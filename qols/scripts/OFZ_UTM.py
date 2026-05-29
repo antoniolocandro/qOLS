@@ -12,6 +12,7 @@ from qgis.PyQt.QtGui import *
 from qgis.gui import *
 from math import sqrt
 
+
 def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
     """Return a list of QgsPoint representing a single polyline.
     Accepts LineString or MultiLineString; for MultiLineString picks the longest part.
@@ -22,6 +23,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
         parts = geometry.asMultiPolyline()
         if not parts:
             raise Exception("Empty MultiLineString geometry.")
+
         def length_of(pts):
             if not pts or len(pts) < 2:
                 return 0.0
@@ -40,6 +42,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
         return [QgsPoint(p) for p in poly]
     raise Exception("Line geometry cannot be converted to a polyline. Only single line or curve types are permitted.")
 
+
 # Parameters - NOW COME FROM UI INSTEAD OF HARDCODED
 try:
     # Try to get parameters from plugin namespace
@@ -50,15 +53,15 @@ try:
     ZE = globals().get('ZE', 2548)
     ARPH = globals().get('ARPH', 2548)
     IHSlope = globals().get('IHSlope', 33.3/100)
-    
+
     # Direction parameter
     s = globals().get('direction', 0)  # 0 for start to end, -1 for end to start
-    
+
     # Layer parameters
     runway_layer = globals().get('runway_layer', None)
     threshold_layer = globals().get('threshold_layer', None)
     use_selected_feature = globals().get('use_selected_feature', True)
-    
+
     # Optional rule-driven parameters injected from UI
     IA_width = globals().get('IA_width', None)
     IA_distance_from_thr = globals().get('IA_distance_from_thr', None)
@@ -71,7 +74,7 @@ try:
 
     print(f"OFZ: Using parameters - code: {code}, width: {width}, Z0: {Z0}, ZE: {ZE}")
     print(f"OFZ: Direction parameter s: {s}, Use selected: {use_selected_feature}")
-    
+
 except Exception as e:
     print(f"OFZ: Error getting parameters, using defaults: {e}")
     # Fallback to defaults if parameters not provided
@@ -100,7 +103,7 @@ map_srid = iface.mapCanvas().mapSettings().destinationCrs().authid()
 try:
     if runway_layer is not None:
         print(f"OFZ: Using Runway Layer Centerline from UI: {runway_layer.name()}")
-        
+
         if use_selected_feature:
             # Require explicit feature selection
             selection = runway_layer.selectedFeatures()
@@ -112,14 +115,14 @@ try:
             if not selection:
                 raise Exception("No features found in Runway Layer Centerline.")
             print(f"OFZ: Using first feature from layer (selection disabled)")
-        
+
         print(f"OFZ: Processing {len(selection)} runway features")
         rwy_geom = selection[0].geometry()
         rwy_length = rwy_geom.length()
         rwy_slope = (Z0-ZE)/rwy_length if rwy_length > 0 else 0
-        
+
         print(f"OFZ: Runway length: {rwy_length}, slope: {rwy_slope}")
-        
+
     else:
         # No fallback - require explicit Runway Layer Centerline selection
         raise Exception("No Runway Layer Centerline provided. Please select a Runway Layer Centerline from the UI.")
@@ -141,7 +144,7 @@ for feat in selection:
     start_point = pts[0]
     end_point = pts[-1]
     angle0 = start_point.azimuth(end_point)
-    
+
     print(f"OFZ: Using consistent points regardless of direction")
     print(f"OFZ: Start point: {start_point.x()}, {start_point.y()}")
     print(f"OFZ: End point: {end_point.x()}, {end_point.y()}")
@@ -163,7 +166,7 @@ print(f"OFZ: Final azimuth: {azimuth}")
 try:
     if threshold_layer is not None:
         print(f"OFZ: Using threshold layer from UI: {threshold_layer.name()}")
-        
+
         if use_selected_feature:
             # Require explicit feature selection
             threshold_selection = threshold_layer.selectedFeatures()
@@ -175,9 +178,9 @@ try:
             if not threshold_selection:
                 raise Exception("No features found in threshold layer.")
             print(f"OFZ: Using first threshold feature from layer (selection disabled)")
-        
+
         print(f"OFZ: Processing {len(threshold_selection)} threshold features")
-        
+
     else:
         # No fallback - require explicit threshold layer selection
         raise Exception("No threshold layer provided. Please select a threshold layer from the UI.")
@@ -203,12 +206,12 @@ print(f"OFZ: Direction change handled by azimuth rotation (180°), not threshold
 
 list_pts = []
 
-# Origin 
+# Origin
 pt_0= new_geom
 print (pt_0)
 pt_0L = new_geom.project(width/2,azimuth+90)
 pt_0R = new_geom.project(width/2,azimuth-90)
-    
+
 # Distance prior from THR (use IA rule distance if available, else 60 m)
 dist_thr = IA_distance_from_thr if IA_distance_from_thr is not None else 60
 pt_01= new_geom.project(dist_thr,azimuth)
@@ -241,7 +244,7 @@ pt_I01L = pt_01L.project((ZIH-Z0)/IHSlope,azimuth+90)
 pt_I01L.setZ(ZIH)
 pt_I01R = pt_01R.project((ZIH-Z0)/IHSlope,azimuth-90)
 pt_I01R.setZ(ZIH)
-#pt_I0R
+# pt_I0R
 
 list_pts.extend ((pt_03,pt_03L,pt_03R,pt_I0L,pt_I0R,pt_I01L,pt_I01R))
 
@@ -284,8 +287,8 @@ p_layer.updateFields()
 #     ur.addFeatures( [ segu ] )
 # QgsProject.instance().addMapLayers([p_layer])
 
-# Creation of the Balked Landing Surfaces 
-#Create memory layer
+# Creation of the Balked Landing Surfaces
+# Create memory layer
 v_layer = QgsVectorLayer("PolygonZ?crs="+map_srid, "RWY_ObstacleFreeZone", "memory")
 IDField = QgsField( 'ID', QVariant.String)
 NameField = QgsField( 'SurfaceName', QVariant.String)
@@ -337,7 +340,7 @@ pr.addFeatures( [ seg ] )
 
 QgsProject.instance().addMapLayers([v_layer])
 
-# Change style of layer 
+# Change style of layer
 v_layer.renderer().symbol().setColor(QColor("blue"))
 v_layer.renderer().symbol().setOpacity(0.4)
 v_layer.triggerRepaint()
@@ -351,8 +354,8 @@ try:
     layer.removeSelection()
 except:
     pass
-    
-#get canvas scale
+
+# get canvas scale
 sc = canvas.scale()
 print (sc)
 if sc < 20000:
@@ -372,5 +375,3 @@ set(globals().keys()).difference(myglobals)
 for g in set(globals().keys()).difference(myglobals):
     if g != 'myglobals':
         del globals()[g]
-
-

@@ -13,7 +13,7 @@ from .compat import DOCK_RIGHT, MSG_INFO, MSG_WARNING, MSG_CRITICAL, MSG_SUCCESS
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.PyQt.QtGui import QIcon, QColor
 from qgis.PyQt.QtWidgets import QAction, QInputDialog
-from qgis.core import (QgsProject, QgsMessageLog, Qgis, QgsVectorLayer,
+from qgis.core import (QgsProject, Qgis, QgsVectorLayer,
                        QgsFeature, QgsGeometry, QgsPoint, QgsField,
                        QgsPolygon, QgsLineString, QgsFillSymbol,
                        QgsVectorFileWriter, QgsCoordinateTransform,
@@ -363,9 +363,6 @@ class QOLS:
 
             runway_layer = params['runway_layer']
             threshold_layer = params['threshold_layer']
-            use_runway_selected = params.get('use_runway_selected', False)
-            use_threshold_selected = params.get('use_threshold_selected', False)
-
             logger.info(
                 f"Executing {os.path.basename(script_path)} — "
                 f"runway='{runway_layer.name()}' threshold='{threshold_layer.name()}'"
@@ -416,7 +413,7 @@ class QOLS:
             # BUG-01: success sentinel
             exec_namespace['_script_success'] = False
 
-            exec(script_content, exec_namespace)
+            exec(script_content, exec_namespace)  # nosec B102 - bundled assets, not user input
 
             # CR-08: propagate success flag back into params so on_calculate can read it
             params['_script_success'] = exec_namespace.get('_script_success', False)

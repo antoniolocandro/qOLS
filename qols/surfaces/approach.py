@@ -18,13 +18,15 @@ Rows interpreted:
 5. First section slope (percent) -> converted to decimal here.
 6. Second section length (L2) - Only for higher performance runways (see mapping).
 7. Second section slope (percent) -> decimal.
-8. Horizontal section length (LH) -> Provided where total length reaches 15000 m (L1+L2+LH = 15000). If L2 absent -> no horizontal section (LH=0).
+8. Horizontal section length (LH) -> Provided where total length reaches 15000 m
+   (L1+L2+LH = 15000). If L2 absent -> no horizontal section (LH=0).
 
 Assumptions / Ambiguities resolved pragmatically:
 - Where table shows combined columns (e.g. codes 1-2), the same value used for both.
 - If second section not present in table -> L2 = 0; LH = 0.
 - For codes with L2 provided and total length known (15 000 m), LH derived = 15000 - L1 - L2.
-- For precision categories codes 3 & 4: adopt L1=3000, L2=3600, LH=8400, slopes 2% (first), 2.5% or 2%?  Using commonly referenced values: first=2% (code ≥3), second=2.5% for CAT I code 3 then 2% others ambiguous. Chosen consistent values: first section slope: CAT I (codes1-2)=2.5%, CAT I (3-4)=2%; CAT II/III (3-4)=2%. Second section slope: 2.5% for CAT I code3? Ambiguity simplified to 2.5% for CAT I code3 only else 2.0%.
+- For precision categories codes 3 & 4: adopt L1=3000, L2=3600, LH=8400. First slope
+  2% (code ≥3); second slope 2.5% for CAT I code 3 only, else 2.0%.
 
 NOTE: These can be refined later if higher-resolution table data supplied.
 """
@@ -135,6 +137,7 @@ def get_approach_defaults(rwy_classification: str, code: int) -> Dict[str, float
         'second_section_slope': slope2,
         'LH_m': lh,
     }
+
 
 __all__ = [
     'get_approach_defaults',

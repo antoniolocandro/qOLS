@@ -13,6 +13,7 @@ from qgis.gui import *
 from math import sqrt, cos, sin, radians
 from qgis.utils import iface
 
+
 def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
     """Return a list of QgsPoint representing a single polyline.
     Accepts LineString or MultiLineString; for MultiLineString picks the longest part.
@@ -23,6 +24,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
         parts = geometry.asMultiPolyline()
         if not parts:
             raise Exception("Empty MultiLineString geometry.")
+
         def length_of(pts):
             if not pts or len(pts) < 2:
                 return 0.0
@@ -41,6 +43,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
         return [QgsPoint(p) for p in poly]
     raise Exception("Line geometry cannot be converted to a polyline. Only single line or curve types are permitted.")
 
+
 # Parameters - NOW COME FROM UI INSTEAD OF HARDCODED
 # These parameters will be injected by the plugin
 try:
@@ -50,18 +53,18 @@ try:
     height = globals().get('height', 60.0)  # Height for 3D polygon (new parameter)
     runway_code = globals().get('code', 4)
     rwy_classification = globals().get('rwyClassification', 'Precision Approach CAT I')
-    
+
     # Direction parameter
     s = globals().get('direction', 0)  # 0 for start to end, -1 for end to start
-    
+
     # Layer parameters
     runway_layer = globals().get('runway_layer', None)
     threshold_layer = globals().get('threshold_layer', None)
     use_selected_feature = globals().get('use_selected_feature', True)
-    
+
     print(f"Conical: Using parameters - radius: {L}m, height: {height}m, code: {runway_code}, class: {rwy_classification}")
     print(f"Conical: Direction parameter s: {s}, Use selected: {use_selected_feature}")
-    
+
 except Exception as e:
     print(f"Conical: Error getting parameters, using defaults: {e}")
     # Fallback to defaults if parameters not provided
@@ -85,7 +88,7 @@ map_srid = iface.mapCanvas().mapSettings().destinationCrs().authid()
 try:
     if runway_layer is not None:
         print(f"Conical: Using Runway Layer Centerline from UI: {runway_layer.name()}")
-        
+
         if use_selected_feature:
             # Require explicit feature selection
             selection = runway_layer.selectedFeatures()
@@ -98,13 +101,13 @@ try:
             if not selection:
                 raise Exception("No features found in Runway Layer Centerline.")
             print(f"Conical: Using first feature from layer (selection disabled)")
-        
+
         print(f"Conical: Processing {len(selection)} runway features")
-        
+
     else:
         # No fallback - require explicit Runway Layer Centerline selection
         raise Exception("No Runway Layer Centerline provided. Please select a Runway Layer Centerline from the UI.")
-        
+
 except Exception as e:
     print(f"Conical: Error with Runway Layer Centerline: {e}")
     iface.messageBar().pushMessage("Conical Error", f"Runway Layer Centerline error: {str(e)}", level=MSG_CRITICAL)
@@ -114,37 +117,37 @@ except Exception as e:
 for feat in selection:
     line_pts = _normalize_polyline_points(feat.geometry(), iface)
     print(f"Conical: Geometry points count (normalized): {len(line_pts)}")
-    
+
     # Use original logic - always first to last point
     start_point = QgsPoint(line_pts[0].x(), line_pts[0].y())
     end_point = QgsPoint(line_pts[-1].x(), line_pts[-1].y())
-    
+
     # Apply direction logic BEFORE calculating azimuth (like original)
     if s == -1:
         # Reverse direction: swap start and end points (matches original behavior)
         start_point, end_point = end_point, start_point
         print(f"Conical: REVERSE direction applied - swapped start/end points")
-    
+
     # Original azimuth calculation
     angle0 = start_point.azimuth(end_point) + 180
     back_angle0 = angle0 + 180
-    
+
     print(f"Conical: Using original calculation logic")
     print(f"Conical: Start point: {start_point.x()}, {start_point.y()}")
     print(f"Conical: End point: {end_point.x()}, {end_point.y()}")
     print(f"Conical: angle0: {angle0}, back_angle0: {back_angle0}")
 
 # ORIGINAL CALCULATION LOGIC - Keep exactly as in working script
-#transformation - exactly as original
+# transformation - exactly as original
 source_crs = QgsCoordinateReferenceSystem(4326)
 dest_crs = QgsCoordinateReferenceSystem(map_srid)
-#transformto
+# transformto
 trto = QgsCoordinateTransform(source_crs, dest_crs,QgsProject.instance())
-#transformfrom
+# transformfrom
 trfm = QgsCoordinateTransform(dest_crs,source_crs ,QgsProject.instance())
 
 # routine 1 circling azimuth - EXACTLY as original
-dist = L #Distance in NM
+dist = L  # Distance in NM
 print(f"Conical: dist={dist}")
 bearing = angle0 - 90
 angle = 90 - bearing
@@ -160,6 +163,8 @@ pro_coords = trto.transform(trfm.transform(xfinal,yfinal))
 start_coords = trfm.transform(start_point.x(),start_point.y())
 
 # Original coord function - EXACTLY as original
+
+
 def coord(angle0,dist1,off):
     dist=dist1
     bearing = angle0+off
@@ -169,15 +174,18 @@ def coord(angle0,dist1,off):
     dist_x, dist_y = \
         (dist * math.cos(angle), dist * math.sin(angle))
     xfinal, yfinal = (start_point.x() + dist_x, start_point.y() + dist_y)
-    
+
     pro_coords = trto.transform(trfm.transform(xfinal,yfinal))
     return pro_coords
-    
+
+
 x2 = coord(angle0,L,90)
 xc = coord(angle0,L,0)
 print(f"Conical: x2={x2}")
 
 # Original coord2 function - EXACTLY as original
+
+
 def coord2(angle0,dist1,off):
     dist=dist1
     bearing = angle0+off
@@ -187,10 +195,11 @@ def coord2(angle0,dist1,off):
     dist_x, dist_y = \
         (dist * math.cos(angle), dist * math.sin(angle))
     xfinal, yfinal = (end_point.x() + dist_x, end_point.y() + dist_y)
-    
+
     pro_coords2 = trto.transform(trfm.transform(xfinal,yfinal))
     return pro_coords2
-    
+
+
 x4 = coord2(back_angle0,L,90)
 x5 = coord2(back_angle0,L,0)
 x6 = coord2(back_angle0,L,-90)
@@ -237,8 +246,8 @@ print(f"Conical: 4. Line: x4 → pro_coords (close polygon)")
 # First arc: Create CircularString and extract points
 # This is exactly how the original code creates the first arc: [pro_coords, xc, x2]
 cString1 = QgsCircularString()
-cString1.setPoints([QgsPoint(pro_coords[0], pro_coords[1]), 
-                    QgsPoint(xc[0], xc[1]), 
+cString1.setPoints([QgsPoint(pro_coords[0], pro_coords[1]),
+                    QgsPoint(xc[0], xc[1]),
                     QgsPoint(x2[0], x2[1])])
 
 # Convert to regular geometry and extract points with high resolution
@@ -250,14 +259,14 @@ if segmented1:
     if segmented1.wkbType() == QgsWkbTypes.LineString:
         polyline1 = segmented1.asPolyline()
         print(f"Conical: Arc 1 interpolated to {len(polyline1)} points (LineString)")
-        
+
         # Add arc points with height
         for point in polyline1:
             polygon_points.append(QgsPoint(point.x(), point.y(), height))
     elif segmented1.wkbType() == QgsWkbTypes.MultiLineString:
         multiline1 = segmented1.asMultiPolyline()
         print(f"Conical: Arc 1 interpolated to {len(multiline1)} parts (MultiLineString)")
-        
+
         # Add points from all parts
         for part in multiline1:
             for point in part:
@@ -281,11 +290,11 @@ else:
 # Add straight line from x2 to x6 (connect arc endpoints, not diagonals)
 polygon_points.append(QgsPoint(x6[0], x6[1], height))
 
-# Second arc: Create CircularString and extract points  
+# Second arc: Create CircularString and extract points
 # This is exactly how the original code creates the second arc: [x6, x5, x4] (REVERSED)
 cString2 = QgsCircularString()
-cString2.setPoints([QgsPoint(x6[0], x6[1]), 
-                    QgsPoint(x5[0], x5[1]), 
+cString2.setPoints([QgsPoint(x6[0], x6[1]),
+                    QgsPoint(x5[0], x5[1]),
                     QgsPoint(x4[0], x4[1])])
 
 # Convert to regular geometry and extract points with high resolution
@@ -297,7 +306,7 @@ if segmented2:
     if segmented2.wkbType() == QgsWkbTypes.LineString:
         polyline2 = segmented2.asPolyline()
         print(f"Conical: Arc 2 interpolated to {len(polyline2)} points (LineString)")
-        
+
         # Add arc points with height (skip first point to avoid duplication with x6)
         for i, point in enumerate(polyline2):
             if i == 0:  # Skip first point as it's the same as x6 we just added
@@ -306,7 +315,7 @@ if segmented2:
     elif segmented2.wkbType() == QgsWkbTypes.MultiLineString:
         multiline2 = segmented2.asMultiPolyline()
         print(f"Conical: Arc 2 interpolated to {len(multiline2)} parts (MultiLineString)")
-        
+
         # Add points from all parts (skip first point of first part to avoid duplication with x6)
         for part_idx, part in enumerate(multiline2):
             for point_idx, point in enumerate(part):
@@ -401,7 +410,7 @@ else:
     # Keep selections for next calculation
     print("Conical: Keeping feature selections for next calculation")
 
-#get canvas scale
+# get canvas scale
 sc = canvas.scale()
 print(f"Conical: Canvas scale: {sc}")
 if sc < 30000:
@@ -418,5 +427,3 @@ iface.messageBar().pushMessage("QOLS Success", f"Conical 3D Surface (R={L}m, H={
 for g in set(globals().keys()).difference(myglobals):
     if g != 'myglobals':
         del globals()[g]
-
-

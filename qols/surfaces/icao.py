@@ -12,7 +12,7 @@ Notes
 - Values derived from Table 4-1 (as commonly reproduced). When in doubt or when
   a specific jurisdiction deviates, the UI still allows manual override.
 """
-from typing import Dict, Tuple
+from typing import Dict
 
 RWY_NON_INSTRUMENT = "Non-instrument"
 RWY_NON_PRECISION = "Non-precision approach"

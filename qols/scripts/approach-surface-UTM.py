@@ -13,6 +13,7 @@ from qgis.gui import *
 from math import sqrt, hypot
 import json
 
+
 def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
     """Return a list of QgsPoint representing a single polyline.
     - Accepts LineString or MultiLineString. For MultiLineString, uses the longest part.
@@ -64,6 +65,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
             raise Exception("Line geometry cannot be converted to a polyline. Only single line or curve types are permitted.")
     except Exception as e:
         raise
+
 
 """Parameter extraction
 Prefers pythonic, UI-aligned names with backward-compatible fallbacks to legacy keys.
@@ -123,7 +125,7 @@ map_srid = iface.mapCanvas().mapSettings().destinationCrs().authid()
 try:
     if runway_layer is not None:
         print(f"QOLS: Using Runway Layer Centerline from UI: {runway_layer.name()}")
-        
+
         if use_selected_feature:
             # Require explicit feature selection
             selection = runway_layer.selectedFeatures()
@@ -140,7 +142,7 @@ try:
                 if not selection:
                     raise Exception("No features found in Runway Layer Centerline.")
                 print(f"QOLS: Using first feature from layer (selection disabled and no active selection)")
-        
+
         print(f"QOLS: Processing {len(selection)} runway features")
         rwy_geom = selection[0].geometry()
         rwy_length = rwy_geom.length()
@@ -185,7 +187,7 @@ print(f"QOLS: Base azimuth (start→end) will be adjusted based on selected thre
 try:
     if threshold_layer is not None:
         print(f"QOLS: Using threshold layer from UI: {threshold_layer.name()}")
-        
+
         if use_selected_feature:
             # Require explicit feature selection
             threshold_selection = threshold_layer.selectedFeatures()
@@ -202,11 +204,11 @@ try:
                 if not threshold_selection:
                     raise Exception("No features found in threshold layer.")
                 print(f"QOLS: Using first threshold feature from layer (selection disabled and no active selection)")
-        
+
         print(f"QOLS: Processing {len(threshold_selection)} threshold features")
-        
+
     else:
-        # No fallback - require explicit threshold layer selection  
+        # No fallback - require explicit threshold layer selection
         raise Exception("No threshold layer provided. Please select a threshold layer from the UI.")
 
 except Exception as e:
@@ -287,9 +289,11 @@ construction_points.extend((pt_0, pt_01, pt_01AL, pt_01AR))
 features_to_create = []  # (id, name, [farRight, farLeft, nearLeft, nearRight])
 next_id = 6
 
+
 def lateral_offset(distance_from_offset: float) -> float:
     """Compute half-width at a given distance from pt_01 considering divergence."""
     return (approach_width_m / 2) + (distance_from_offset * divergence_ratio)
+
 
 # --- First Section (always created if L1 > 0) ---
 if first_section_length_m > 0:
@@ -383,10 +387,10 @@ for fid, name, surface_area, sec_start_elev, sec_end_elev in features_to_create:
     feature.setAttributes([fid, name, rwy_classification, runway_code, globals().get('active_rule_set', None), round(sec_start_elev, 3), round(sec_end_elev, 3), _params_json])
     provider.addFeatures([feature])
 
-# Load PolygonZ Layer to map canvas 
+# Load PolygonZ Layer to map canvas
 QgsProject.instance().addMapLayers([approach_layer])
 
-# Change style of layer 
+# Change style of layer
 approach_layer.renderer().symbol().setColor(QColor("green"))
 approach_layer.renderer().symbol().setOpacity(0.4)
 approach_layer.triggerRepaint()
@@ -428,7 +432,9 @@ iface.messageBar().pushMessage("QOLS Success", f"Approach Surface ({rwy_classifi
 # -----------------------------------------------------------------------
 contour_interval_m = int(globals().get('contour_interval_m', 0))
 if contour_interval_m > 0:
-    import importlib.util as _ilu, os as _os, sys as _sys
+    import importlib.util as _ilu
+    import os as _os
+    import sys as _sys
     _utils_path = _os.path.join(_os.path.dirname(__file__), '_contour_utils.py')
     _cu_spec = _ilu.spec_from_file_location('_contour_utils', _utils_path)
     _cu = _ilu.module_from_spec(_cu_spec)
@@ -501,6 +507,3 @@ set(globals().keys()).difference(myglobals)
 for g in set(globals().keys()).difference(myglobals):
     if g != 'myglobals':
         del globals()[g]
-
-
-

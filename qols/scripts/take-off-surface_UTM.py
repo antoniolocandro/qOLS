@@ -14,6 +14,7 @@ from qgis.utils import iface
 from math import sqrt, degrees
 import traceback
 
+
 def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
     """Return a list of QgsPoint representing a single polyline.
     Accepts LineString or MultiLineString; for MultiLineString picks the longest part.
@@ -24,6 +25,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
         parts = geometry.asMultiPolyline()
         if not parts:
             raise Exception("Empty MultiLineString geometry.")
+
         def length_of(pts):
             if not pts or len(pts) < 2:
                 return 0.0
@@ -41,6 +43,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
     if poly and len(poly) >= 2:
         return [QgsPoint(p) for p in poly]
     raise Exception("Line geometry cannot be converted to a polyline. Only single line or curve types are permitted.")
+
 
 # UI Parameters - Get from plugin or use defaults (now driven by UI)
 print("TakeOffSurface: Script started - checking for UI parameters...")
@@ -69,17 +72,17 @@ try:
     startDistance = globals().get('startDistance', 60.0)
     surfaceLength = globals().get('surfaceLength', 15000.0)
     slopePct = globals().get('slopePct', 2.0)
-    
+
     # Layer parameters from UI
     runway_layer = globals().get('runway_layer')
     threshold_layer = globals().get('threshold_layer')
-    
+
     print(f"TakeOffSurface: Using UI parameters - code={code}, direction={s}")
     print(f"TakeOffSurface: Z0={Z0}, ZE={ZE}, widthDep={widthDep}, maxWidthDep={maxWidthDep}")
     print(f"TakeOffSurface: divergencePct={divergencePct}%, startDistance={startDistance} m, surfaceLength={surfaceLength} m, slopePct={slopePct}%")
     print(f"TakeOffSurface: runway_layer={runway_layer}, threshold_layer={threshold_layer}")
     print(f"TakeOffSurface: Direction parameter s={s} ({'End to Start' if s == -1 else 'Start to End'})")
-    
+
 except Exception as e:
     print(f"TakeOffSurface: Error getting UI parameters: {e}")
     print(f"TakeOffSurface: Traceback: {traceback.format_exc()}")
@@ -147,15 +150,15 @@ try:
                 break
         else:
             raise Exception("No Runway Layer Centerline found")
-    
+
     print(f"TakeOffSurface: Using Runway Layer Centerline: {layer.name()}")
-    
+
     # ORIGINAL runway calculations
     rwy_geom = selection[0].geometry()
     rwy_length = rwy_geom.length()
     rwy_slope = (Z0-ZE)/rwy_length
     print(f"TakeOffSurface: rwy_length={rwy_length}")
-    
+
 except Exception as e:
     print(f"TakeOffSurface: Error with Runway Layer Centerline: {e}")
     iface.messageBar().pushMessage("TakeOffSurface Error", f"Runway Layer Centerline error: {str(e)}", level=MSG_CRITICAL)
@@ -168,13 +171,13 @@ ZIHs = ((Z0 - ((Z0 - ZE) / rwy_length) * 1800))
 for feat in selection:
     line_pts = _normalize_polyline_points(feat.geometry(), iface)
     print(f"TakeOffSurface: Geometry points count (normalized): {len(line_pts)}")
-    
+
     # FIXED: Always use the same points regardless of direction
     # Direction change is handled by azimuth rotation only (like approach-surface)
     start_point = line_pts[0]   # Always first point
     end_point = line_pts[-1]    # Always last point
     angle0 = start_point.azimuth(end_point)
-    
+
     print(f"TakeOffSurface: Using consistent points regardless of direction")
     print(f"TakeOffSurface: start_point = first vertex of normalized line")
     print(f"TakeOffSurface: end_point = last vertex of normalized line")
@@ -209,7 +212,7 @@ if bazimuth >= 360:
 print(f"TakeOffSurface: Back azimuth (bazimuth): {bazimuth:.2f}°")
 print(f"TakeOffSurface: Direction button should now work correctly!")
 
-# THRESHOLD LAYER SELECTION - Hybrid approach  
+# THRESHOLD LAYER SELECTION - Hybrid approach
 try:
     if threshold_layer:
         # Use layer from UI
@@ -276,7 +279,7 @@ pt_03DR = pt_03D.project(maxWidthDep/2, bazimuth-90)
 list_pts.extend((pt_0D,pt_01D,pt_01DL,pt_01DR,pt_02D,pt_02DL,pt_02DR,pt_03D,pt_03DL,pt_03DR))
 
 # Creation of the Take Off Climb Surfaces - EXACTLY as original
-#Create memory layer
+# Create memory layer
 v_layer = QgsVectorLayer("PolygonZ?crs="+map_srid, "RWY_TakeOffClimbSurface", "memory")
 IDField = QgsField( 'ID', QVariant.String)
 NameField = QgsField( 'SurfaceName', QVariant.String)
@@ -294,7 +297,7 @@ seg.setGeometry(QgsPolygon(QgsLineString(SurfaceArea), rings=[]))
 seg.setAttributes([13,'TakeOff Climb Surface', globals().get('active_rule_set', None)])
 pr.addFeatures( [ seg ] )
 
-#Load PolygonZ Layer to map canvas - EXACTLY as original
+# Load PolygonZ Layer to map canvas - EXACTLY as original
 QgsProject.instance().addMapLayers([v_layer])
 
 # Change style of layer - EXACTLY as original
@@ -309,7 +312,7 @@ canvas.zoomToSelected(v_layer)
 v_layer.removeSelection()
 layer.removeSelection()
 
-#get canvas scale - EXACTLY as original
+# get canvas scale - EXACTLY as original
 sc = canvas.scale()
 print(sc)
 if sc < 20000:
@@ -327,7 +330,9 @@ iface.messageBar().pushMessage("QPANSOPY:", "TakeOff Climb Surface Calculation F
 # -----------------------------------------------------------------------
 contour_interval_m = int(globals().get('contour_interval_m', 0))
 if contour_interval_m > 0:
-    import importlib.util as _ilu, os as _os, sys as _sys
+    import importlib.util as _ilu
+    import os as _os
+    import sys as _sys
     _utils_path = _os.path.join(_os.path.dirname(__file__), '_contour_utils.py')
     _cu_spec = _ilu.spec_from_file_location('_contour_utils', _utils_path)
     _cu = _ilu.module_from_spec(_cu_spec)
@@ -390,6 +395,3 @@ for var in (newglobals - myglobals):
             pass
 
 print(f"TakeOffSurface: Globals cleanup completed")
-
-
-

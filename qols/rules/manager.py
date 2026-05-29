@@ -144,7 +144,9 @@ class RuleManager:
         # Approach (width, offsets, divergences, sections)
         app = data.get('approach')
         if isinstance(app, dict):
-            for key in ['width_m', 'threshold_offset_m', 'divergence_pct', 'L1_m', 'slope1_pct', 'L2_m', 'slope2_pct', 'LH_m']:
+            app_keys = ['width_m', 'threshold_offset_m', 'divergence_pct',
+                        'L1_m', 'slope1_pct', 'L2_m', 'slope2_pct', 'LH_m']
+            for key in app_keys:
                 if key in app:
                     app[key] = normalize_map(app.get(key, {}))
 
@@ -167,7 +169,7 @@ class RuleManager:
             for key in ['width_m', 'distance_from_threshold_m', 'length_m', 'slope_pct']:
                 if key in ia:
                     ia[key] = normalize_map(ia.get(key, {}))
-		
+
         # Balked Landing
         bl = data.get('balked_landing')
         if isinstance(bl, dict):

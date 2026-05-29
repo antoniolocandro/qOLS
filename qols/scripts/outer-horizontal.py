@@ -71,22 +71,22 @@ for feat in selection:
     arp_point = feat.geometry().asPoint()
     arp_x, arp_y = arp_point.x(), arp_point.y()
     print(f"OuterHorizontal: Creating 15,000m circle at ARP: {arp_x}, {arp_y}")
-    
+
     # Create circular polygon using PyQGIS native QgsCircle (as requested by client)
     # Fix: Convert QgsPointXY to QgsPoint for QgsCircle compatibility
     center_point = QgsPoint(arp_x, arp_y)
-    
+
     # Use PyQGIS native QgsCircle for precise geometry generation (DOC 9137 compliance)
     qgs_circle = QgsCircle(center_point, radius)
-    
+
     # Convert circle to polygon with configurable precision
     # Note: Consider making this configurable in plugin settings for different precision needs
     num_segments = 360  # Increased from 72 as per client feedback
     polygon_geometry = qgs_circle.toPolygon(num_segments)
-    
+
     # Convert to QgsGeometry
     circle_geometry = QgsGeometry(polygon_geometry)
-    
+
     # Create feature with proper geometry reference
     feature = QgsFeature()
     feature.setGeometry(circle_geometry)
@@ -99,11 +99,11 @@ for feat in selection:
         arp_x,
         arp_y
     ])
-    
+
     # Add feature to layer
     v_layer_provider.addFeatures([feature])
     features_created += 1
-    
+
     print(f"OuterHorizontal: Created circle with radius {radius}m at ARP ({arp_x:.2f}, {arp_y:.2f})")
 
 v_layer.updateExtents()
@@ -129,7 +129,7 @@ if features_created > 0:
     canvas = iface.mapCanvas()
     canvas.zoomToSelected(v_layer)
     v_layer.removeSelection()
-    
+
     # Set appropriate scale for large circle
     sc = canvas.scale()
     print(f"OuterHorizontal: Canvas scale: {sc}")

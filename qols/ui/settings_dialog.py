@@ -8,8 +8,7 @@ the user:
 * Open the rules folder in the file manager.
 """
 import os
-from qgis.PyQt import QtWidgets, QtCore
-from qgis.PyQt.QtCore import Qt, QUrl
+from qgis.PyQt.QtCore import QUrl
 from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QDialogButtonBox
 from qgis.PyQt.QtGui import QDesktopServices
 

@@ -7,6 +7,7 @@
  ***************************************************************************/
 """
 
+
 def classFactory(iface):
     """Load QOLS class from file plugin."""
     from .plugin import QOLS
