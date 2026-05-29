@@ -13,8 +13,6 @@ from qgis.core import *
 from qgis.PyQt.QtCore import *
 from qgis.PyQt.QtGui import *
 from qgis.gui import *
-from math import *
-
 # Work exclusively in projected coordinate system - no transformations needed
 map_srid = iface.mapCanvas().mapSettings().destinationCrs().authid()
 print(f"OuterHorizontal: Working in projected CRS: {map_srid}")

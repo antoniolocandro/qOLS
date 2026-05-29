@@ -202,7 +202,7 @@
              <string>No selection</string>
             </property>
             <property name="styleSheet">
-             <string>QLabel { color: #b71c1c; font-weight: bold; font-size: 11px; }</string>
+             <string>QLabel { font-weight: bold; font-size: 11px; }</string>
             </property>
             <property name="minimumHeight"><number>16</number></property>
             <property name="maximumHeight"><number>16</number></property>
@@ -290,7 +290,7 @@
              <string>No selection</string>
             </property>
             <property name="styleSheet">
-             <string>QLabel { color: #b71c1c; font-weight: bold; font-size: 11px; }</string>
+             <string>QLabel { font-weight: bold; font-size: 11px; }</string>
             </property>
             <property name="minimumHeight"><number>16</number></property>
             <property name="maximumHeight"><number>16</number></property>
@@ -620,7 +620,7 @@
            <string>Inner Horizontal Surface</string>
           </property>
           <property name="styleSheet">
-           <string>QLabel { font-weight: bold; color: #2e3440; padding-top: 12px; padding-bottom: 4px; border-bottom: 1px solid #d8dce6; }</string>
+           <string>QLabel { font-weight: bold; padding-top: 12px; padding-bottom: 4px; }</string>
           </property>
          </widget>
         </item>
@@ -665,7 +665,7 @@
            <string>Conical Surface</string>
           </property>
           <property name="styleSheet">
-           <string>QLabel { font-weight: bold; color: #2e3440; padding-top: 12px; padding-bottom: 4px; border-bottom: 1px solid #d8dce6; }</string>
+           <string>QLabel { font-weight: bold; padding-top: 12px; padding-bottom: 4px; }</string>
           </property>
          </widget>
         </item>
@@ -739,7 +739,7 @@
            <bool>true</bool>
           </property>
           <property name="styleSheet">
-              <string>QLabel { background-color: #e8f2ff; color: #1f4e79; font-size: 11px; border: 1px solid #c5d9f2; border-radius: 4px; padding: 8px; }</string>
+              <string>QLabel { font-size: 11px; border-radius: 4px; padding: 8px; }</string>
           </property>
          </widget>
         </item>
@@ -910,7 +910,7 @@
       <set>Qt::AlignCenter</set>
      </property>
      <property name="styleSheet">
-      <string>QLabel { background: #f5f5f5; border: 1px solid #bdbdbd; padding: 8px; font-weight: bold; color: #555; border-radius:4px; }</string>
+      <string>QLabel { border: 1px solid; padding: 8px; font-weight: bold; border-radius: 4px; }</string>
      </property>
      <property name="visible">
       <bool>false</bool>
@@ -1025,7 +1025,7 @@
            <bool>true</bool>
           </property>
                     <property name="styleSheet">
-                     <string>QLabel { background-color: #e8f2ff; color: #1f4e79; font-size: 11px; border: 1px solid #c5d9f2; border-radius: 4px; padding: 8px; }</string>
+                     <string>QLabel { font-size: 11px; border-radius: 4px; padding: 8px; }</string>
                     </property>
          </widget>
         </item>

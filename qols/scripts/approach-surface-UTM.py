@@ -10,14 +10,8 @@ from qgis.core import *
 from qgis.PyQt.QtCore import *
 from qgis.PyQt.QtGui import *
 from qgis.gui import *
-from math import *
+from math import sqrt, hypot
 import json
-
-# Qgis message-level compat (QGIS 3/Qt5: Qgis.Info  QGIS 4/Qt6: Qgis.MessageLevel.Info)
-try:
-    _ML = Qgis.MessageLevel
-except AttributeError:
-    _ML = Qgis  # QGIS 3: level constants sit directly on Qgis
 
 def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
     """Return a list of QgsPoint representing a single polyline.
@@ -49,7 +43,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
                 iface.messageBar().pushMessage(
                     "QOLS Info",
                     "MultiLineString detected; using longest part as centerline.",
-                    level=_ML.Info
+                    level=MSG_INFO
                 )
             return [QgsPoint(p) for p in longest]
 
@@ -159,7 +153,7 @@ try:
 
 except Exception as e:
     print(f"QOLS: Error with Runway Layer Centerline: {e}")
-    iface.messageBar().pushMessage("QOLS Error", f"Runway Layer Centerline error: {str(e)}", level=_ML.Critical)
+    iface.messageBar().pushMessage("QOLS Error", f"Runway Layer Centerline error: {str(e)}", level=MSG_CRITICAL)
     raise
 
 # Calculate ZIH at start (legacy name ZIHs)
@@ -217,7 +211,7 @@ try:
 
 except Exception as e:
     print(f"QOLS: Error with threshold layer: {e}")
-    iface.messageBar().pushMessage("QOLS Error", f"Threshold layer error: {str(e)}", level=_ML.Critical)
+    iface.messageBar().pushMessage("QOLS Error", f"Threshold layer error: {str(e)}", level=MSG_CRITICAL)
     raise
 
 # Get x,y from threshold - ORIGINAL LOGIC RESTORED
@@ -427,7 +421,7 @@ print(f"QOLS: Created layer: {layer_name}")
 print(f"QOLS: Surface type: {rwy_classification}, Code: {runway_code}, Width: {approach_width_m}m")
 
 # Success message
-iface.messageBar().pushMessage("QOLS Success", f"Approach Surface ({rwy_classification}, Code {runway_code}) calculated successfully", level=_ML.Success)
+iface.messageBar().pushMessage("QOLS Success", f"Approach Surface ({rwy_classification}, Code {runway_code}) calculated successfully", level=MSG_SUCCESS)
 
 # -----------------------------------------------------------------------
 # Contour layer (CT-08 – CT-16)

@@ -18,9 +18,12 @@ calling :func:`reload_rules`.
 """
 import os
 import json
+import logging
 from typing import Dict, Optional, Any
 
 from qgis.PyQt.QtCore import QSettings
+
+_log = logging.getLogger(__name__)
 
 # Normalized classification keys expected from UI
 CLASS_KEYS = [
@@ -110,8 +113,8 @@ class RuleManager:
                 # Normalize classification maps if present
                 self._normalize_classification_maps(data)
                 self._registry[name] = data
-            except Exception:
-                # Ignore broken rule files; they will be skipped
+            except Exception as e:
+                _log.warning(f"Skipping rule file {fpath!r}: {e}")
                 continue
 
         self._rules_loaded = True
@@ -198,7 +201,8 @@ class RuleManager:
             if not name and len(self._registry) == 1:
                 return next(iter(self._registry.keys()))
             return name
-        except Exception:
+        except Exception as e:
+            _log.warning(f"get_active_rule_set_name failed: {e}")
             return None
 
     def set_active_rule_set_name(self, name: Optional[str]):
@@ -313,7 +317,8 @@ class RuleManager:
             if val is None:
                 val = class_map.get(int(code))
             return float(val) if val is not None else None
-        except Exception:
+        except Exception as e:
+            _log.warning(f"_class_code_lookup failed for {rwy_classification!r} code={code}: {e}")
             return None
 
     def get_approach_defaults(self, rwy_classification: str, code: int) -> Optional[Dict[str, float]]:

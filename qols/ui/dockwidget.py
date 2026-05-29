@@ -15,6 +15,7 @@ Business logic (ICAO table lookups, rule-set merging) lives in
 import os
 import sys
 import traceback
+from dataclasses import dataclass
 from ..surfaces.icao import (
     get_conical_defaults as icao_get_conical_defaults,
     get_inner_horizontal_defaults as icao_get_inner_horizontal_defaults,
@@ -23,9 +24,11 @@ from ..surfaces.icao import (
 from ..rules import manager as rule_mgr
 from ..surfaces.approach import get_approach_defaults as icao_get_approach_defaults
 from ..surface_types import SurfaceType
+from .. import logger  # CR-01
 from qgis.PyQt import uic
-from qgis.PyQt.QtCore import pyqtSignal, Qt, QTimer
-from qgis.PyQt.QtWidgets import QCheckBox, QComboBox, QDockWidget, QLabel, QLineEdit, QToolTip
+from qgis.PyQt.QtCore import pyqtSignal, Qt, QTimer, pyqtSlot, QRegularExpression
+from qgis.PyQt.QtGui import QRegularExpressionValidator
+from qgis.PyQt.QtWidgets import QApplication, QCheckBox, QComboBox, QDockWidget, QLabel, QLineEdit, QToolTip
 from ..compat import TOOLTIP_ROLE, MSG_INFO, MSG_CRITICAL
 from qgis.core import QgsMapLayerProxyModel, QgsProject, Qgis, QgsWkbTypes, QgsVectorLayer
 
@@ -33,10 +36,60 @@ from qgis.core import QgsMapLayerProxyModel, QgsProject, Qgis, QgsWkbTypes, QgsV
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'qols_panel_base.ui'))
 
+@dataclass
+class _ApproachState:
+    """Bundled output of apply_approach_defaults_from_selection.
+
+    Stored as a single atomic assignment so partially-updated state is impossible.
+    """
+    divergence_ratio:    float = 0.15
+    slope1:             float = 0.02
+    slope2:             float = 0.025
+    threshold_offset_m: float = 60.0
+
+
 class QolsDockWidget(QDockWidget, FORM_CLASS):
     closingPlugin = pyqtSignal()
     calculateClicked = pyqtSignal()
     closeClicked = pyqtSignal()
+
+    # Single source of truth for numeric widget defaults (CR-06).
+    # All three methods that set initial/reset values read from here.
+    _WIDGET_DEFAULTS: dict = {
+        # Approach
+        'spin_widthApp':              280.0,
+        'spin_Z0':                   2548.0,
+        'spin_ZE':                   2546.5,
+        'spin_ARPH':                 2548.0,
+        'spin_L1':                   3000.0,
+        'spin_L2':                   3600.0,
+        'spin_LH':                   8400.0,
+        # Inner Horizontal + Conical
+        'spin_L_conical':            6000.0,
+        'spin_height_conical':         60.0,
+        'spin_L_inner':              4000.0,
+        'spin_height_inner':           45.0,
+        # OFZ
+        'spin_width_ofz':             120.0,
+        'spin_Z0_ofz':               2548.0,
+        'spin_ZE_ofz':               2546.5,
+        'spin_ARPH_ofz':             2548.0,
+        'spin_IHSlope_ofz':            33.3,
+        # Outer Horizontal
+        'spin_radius_outer':        15000.0,
+        'spin_height_outer':          150.0,
+        # Take-Off
+        'spin_widthDep_takeoff':      180.0,
+        'spin_maxWidthDep_takeoff':  1800.0,
+        'spin_CWYLength_takeoff':       0.0,
+        'spin_Z0_takeoff':           2548.0,
+        # Transitional
+        'spin_widthApp_transitional': 280.0,
+        'spin_Z0_transitional':      2548.0,
+        'spin_ZE_transitional':      2546.5,
+        'spin_ARPH_transitional':    2548.0,
+        'spin_Tslope_transitional':    14.3,
+    }
 
     # Widgets declared in qols_panel_base.ui, guaranteed available after setupUi() (R-04)
     spin_code_takeoff: QComboBox
@@ -64,7 +117,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         """Constructor with enhanced error handling and layer management."""
         super(QolsDockWidget, self).__init__(parent)
         self.iface = iface
-        
+
         # Track connected layers for selection signals (Issue #59)
         self.connected_runway_layer = None
         self.connected_threshold_layer = None
@@ -73,92 +126,78 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         self._last_threshold_count = 0
         # Tracked signal connections for clean teardown in closeEvent (R-05)
         self._connections: list = []
+        # Cached approach defaults — always exists so get_parameters() never needs getattr fallback
+        self._approach_state: _ApproachState = _ApproachState()
 
         try:
-            print("QOLS: Initializing QolsDockWidget")
             self.setupUi(self)
-            print("QOLS: Setting up UI")
-            
+
             # Configure numeric input validation for all QLineEdit widgets (formerly QDoubleSpinBox)
             self.setup_numeric_lineedit_validation()
-            
+
             # Configure layer combo boxes with geometry filtering
             self.setup_layer_filters()
-            
-            # Apply enhanced combo styling 
+
+            # Apply enhanced combo styling
             self.setup_enhanced_combos()
-            
+
             # Setup tooltips for individual dropdown items (AFTER styling to avoid override)
             self.setup_dropdown_tooltips()
 
             # Wire Take-Off code change to apply defaults from table
             try:
-                self.spin_code_takeoff.currentIndexChanged.connect(self.update_takeoff_defaults_from_code)
-                # Toggle visibility/behavior on code change
-                self.spin_code_takeoff.currentIndexChanged.connect(self.update_takeoff_final_width_controls)
-                # Also react when user toggles the checkbox
-                self.check_finalWidth1800_takeoff.toggled.connect(self.on_final_width_checkbox_toggled)
+                self._connect(self.spin_code_takeoff.currentIndexChanged, self.update_takeoff_defaults_from_code)
+                self._connect(self.spin_code_takeoff.currentIndexChanged, self.update_takeoff_final_width_controls)
+                self._connect(self.check_finalWidth1800_takeoff.toggled, self.on_final_width_checkbox_toggled)
             except Exception as e:
-                print(f"QOLS: Could not connect Take-Off code change handler: {e}")
-            
-            # Set default values - separate controls for each layer
+                logger.warning(f"Could not connect Take-Off code change handler: {e}")
+
             self.useSelectedRunwayCheckBox.setChecked(False)
             self.useSelectedThresholdCheckBox.setChecked(False)
-            
-            # Initialize Take-Off Surface default values immediately
-            self.initialize_takeoff_defaults()
-            # Initialize Code-based final width control visibility
+
+            self.initialize_all_numeric_defaults()
             self.update_takeoff_final_width_controls()
 
-            # Wire Approach classification/code changes to apply defaults
             try:
-                self.combo_rwyClassification.currentIndexChanged.connect(self.apply_approach_defaults_from_selection)
-                self.spin_code.currentIndexChanged.connect(self.apply_approach_defaults_from_selection)
+                self._connect(self.combo_rwyClassification.currentIndexChanged, self.apply_approach_defaults_from_selection)
+                self._connect(self.spin_code.currentIndexChanged, self.apply_approach_defaults_from_selection)
             except Exception as e:
-                print(f"QOLS: Could not connect Approach defaults handlers: {e}")
+                logger.warning(f"Could not connect Approach defaults handlers: {e}")
 
-            # Wire OFZ classification changes to visibility logic (Issue #51)
             try:
-                self.combo_rwyClassification_ofz.currentIndexChanged.connect(self.update_ofz_visibility)
-                self.combo_rwyClassification_ofz.currentIndexChanged.connect(self.apply_ofz_defaults_from_selection)
-                self.spin_code_ofz.currentIndexChanged.connect(self.apply_ofz_defaults_from_selection)
+                self._connect(self.combo_rwyClassification_ofz.currentIndexChanged, self.update_ofz_visibility)
+                self._connect(self.combo_rwyClassification_ofz.currentIndexChanged, self.apply_ofz_defaults_from_selection)
+                self._connect(self.spin_code_ofz.currentIndexChanged, self.apply_ofz_defaults_from_selection)
             except Exception as e:
-                print(f"QOLS: Could not connect OFZ visibility handler: {e}")
+                logger.warning(f"Could not connect OFZ visibility handler: {e}")
 
-            # Initialize new RWY Classification + Code defaults for Conical and Inner Horizontal
             try:
-                # Default combined Inner Horizontal & Conical tab to CAT I / Code 4
                 self.combo_rwyClassification_inner_conical.setCurrentText('Precision Approach CAT I')
                 self.set_code_value('spin_code_inner_conical', 4)
-                # Wire change handlers to prefill defaults from ICAO table
                 self._wire_combined_inner_conical_defaults()
-                # Apply initial defaults based on the selections
                 self.apply_combined_inner_conical_defaults_from_selection()
             except Exception as e:
-                print(f"QOLS: Could not initialize RWY/Code defaults for Conical/Inner: {e}")
+                logger.warning(f"Could not initialize RWY/Code defaults for Conical/Inner: {e}")
 
-            # Wire recalculation of conical radius when slope/height or inner radius changes
             try:
-                self.spin_conical_slope.editingFinished.connect(self.recalculate_conical_radius)
-                self.spin_height_conical.editingFinished.connect(self.recalculate_conical_radius)
-                self.spin_L_inner.editingFinished.connect(self.recalculate_conical_radius)
+                self._connect(self.spin_conical_slope.editingFinished, self.recalculate_conical_radius)
+                self._connect(self.spin_height_conical.editingFinished, self.recalculate_conical_radius)
+                self._connect(self.spin_L_inner.editingFinished, self.recalculate_conical_radius)
             except Exception as e:
-                print(f"QOLS: Could not connect conical radius recalculation signals: {e}")
+                logger.warning(f"Could not connect conical radius recalculation signals: {e}")
 
-            # Wire Transitional classification/code changes to apply defaults
             try:
-                self.combo_rwyClassification_transitional.currentIndexChanged.connect(self.apply_transitional_defaults_from_selection)
-                self.spin_code_transitional.currentIndexChanged.connect(self.apply_transitional_defaults_from_selection)
+                self._connect(self.combo_rwyClassification_transitional.currentIndexChanged, self.apply_transitional_defaults_from_selection)
+                self._connect(self.spin_code_transitional.currentIndexChanged, self.apply_transitional_defaults_from_selection)
             except Exception as e:
-                print(f"QOLS: Could not connect Transitional defaults handlers: {e}")
+                logger.warning(f"Could not connect Transitional defaults handlers: {e}")
 
-            # Apply initial Approach defaults (after initial numeric defaults so they override)
             try:
                 self._apply_all_defaults()
             except Exception as e:
-                print(f"QOLS: Could not apply initial defaults: {e}")
+                logger.warning(f"Could not apply initial defaults: {e}")
 
-            
+
             # Connect signals for real-time feedback (tracked for clean closeEvent teardown)
             self._connect(self.useSelectedRunwayCheckBox.toggled, self.update_selection_info)
             self._connect(self.useSelectedThresholdCheckBox.toggled, self.update_selection_info)
@@ -172,16 +211,16 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             # SAFETY: Connect to layer combo changes for immediate validation
             self._connect(self.runwayLayerCombo.layerChanged, self.validate_layer_change)
             self._connect(self.thresholdLayerCombo.layerChanged, self.validate_layer_change)
-            
+
             # Connect signals
-            self.calculateButton.clicked.connect(self.on_calculate_clicked)
-            self.cancelButton.clicked.connect(self.on_close_clicked)
-            self.directionButton.clicked.connect(self.toggle_direction)
-            self.button_rotate_transitional.clicked.connect(self.toggle_transitional_direction)
-            
+            self._connect(self.calculateButton.clicked, self.on_calculate_clicked)
+            self._connect(self.cancelButton.clicked, self.on_close_clicked)
+            self._connect(self.directionButton.clicked, self.toggle_direction)
+            self._connect(self.button_rotate_transitional.clicked, self.toggle_transitional_direction)
+
             # Connect tab change to reinitialize defaults (helpful for widget visibility)
-            self.scriptTabWidget.currentChanged.connect(self.on_tab_changed)
-            
+            self._connect(self.scriptTabWidget.currentChanged, self.on_tab_changed)
+
             # Set initial direction
             self.direction_start_to_end = True
             self.transitional_direction_normal = True  # True = normal (s=0), False = rotated (s=-1)
@@ -191,29 +230,27 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             self.update_transitional_direction_button()
             self.update_selection_info()
 
-            print("QOLS: QolsDockWidget initialized successfully")
 
             # Apply initial OFZ visibility state after UI setup
             try:
                 self.update_ofz_visibility()
             except Exception as e:
-                print(f"QOLS: Could not apply initial OFZ visibility: {e}")
-                
+                logger.warning(f"Unhandled error: {e}")
+
             # Initialize selection signal connections (Issue #59)
             try:
                 self.connect_layer_selection_signals()
             except Exception as e:
-                print(f"QOLS: Could not initialize selection signal connections: {e}")
+                logger.warning(f"Unhandled error: {e}")
 
             # Update active rule set label (if present)
             try:
                 self.update_active_rule_set_label()
             except Exception as e:
-                print(f"QOLS: Could not update active rule set label: {e}")
-            
+                logger.warning(f"Unhandled error: {e}")
+
         except Exception as e:
-            print(f"QOLS: Error initializing QolsDockWidget: {e}")
-            traceback.print_exc()
+            logger.error(f"Error in QolsDockWidget.__init__: {e}\n{traceback.format_exc()}")
             raise
 
     def update_active_rule_set_label(self):
@@ -224,18 +261,13 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             name = rule_mgr.get_active_rule_set_name() or 'ICAO (built-in)'
             label.setText(name)
         except Exception as e:
-            print(f"QOLS: Error updating active rule set label: {e}")
+            logger.error(f"Error updating active rule set label: {e}")
 
     def setup_numeric_lineedit_validation(self):
         """Configure numeric input validation for all QLineEdit widgets (formerly QDoubleSpinBox)."""
         try:
-            from qgis.PyQt.QtCore import QRegularExpression
-            from qgis.PyQt.QtGui import QRegularExpressionValidator
-            
-            print("QOLS: Setting up numeric validation for QLineEdit widgets")
-            
             lineedit_names = [
-                'spin_widthApp', 'spin_Z0', 'spin_ZE', 'spin_ARPH', 
+                'spin_widthApp', 'spin_Z0', 'spin_ZE', 'spin_ARPH',
                 'spin_L1', 'spin_L2', 'spin_LH',
                 'spin_L_conical', 'spin_height_conical',
                 'spin_L_inner', 'spin_height_inner',
@@ -246,170 +278,99 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 'spin_widthApp_transitional', 'spin_Z0_transitional', 'spin_ZE_transitional',
                 'spin_ARPH_transitional', 'spin_Tslope_transitional'
             ]
-            
-            default_values = {
-                'spin_widthApp': '280.00', 'spin_Z0': '21.70', 'spin_ZE': '42.70', 'spin_ARPH': '15.00',
-                'spin_L1': '60.00', 'spin_L2': '60.00', 'spin_LH': '0.00',
-                'spin_L_conical': '6000.00', 'spin_height_conical': '60.00',
-                'spin_L_inner': '4000.00', 'spin_height_inner': '45.00',
-                'spin_width_ofz': '120.00', 'spin_Z0_ofz': '2548.00', 'spin_ZE_ofz': '2546.50',
-                'spin_ARPH_ofz': '2548.00', 'spin_IHSlope_ofz': '33.30',
-                'spin_radius_outer': '15000.00', 'spin_height_outer': '150.00'
-            }
-            
+
             # Allow unlimited decimals; optional sign and decimal part
             decimal_pattern = r'^-?\d*(?:\.\d*)?$'
             regex = QRegularExpression(decimal_pattern)
             validator = QRegularExpressionValidator(regex)
-            
-            configured_count = 0
+
             for name in lineedit_names:
                 try:
                     lineedit = getattr(self, name, None)
                     if lineedit and hasattr(lineedit, 'setText'):
                         lineedit.setValidator(validator)
-                        lineedit.setText(default_values.get(name, '0.00'))
+                        v = self._WIDGET_DEFAULTS.get(name, 0.0)
+                        text = f"{int(round(v))}.00" if abs(v - round(v)) < 1e-6 else f"{v:.2f}"
+                        lineedit.setText(text)
                         self._configure_smart_formatting(lineedit)
-                        configured_count += 1
-                        print(f"QOLS: Configured {name} - numeric validation and default value set")
                 except Exception as e:
-                    print(f"QOLS: Warning - could not configure {name}: {e}")
-            
-            print(f"QOLS: Successfully configured {configured_count} QLineEdit widgets with numeric validation")
-            print("QOLS: All numeric inputs now support unlimited decimal precision with clean display")
+                    logger.warning(f"Unhandled error: {e}")
+
         except Exception as e:
-            print(f"QOLS: Error in numeric validation setup: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def _configure_smart_formatting(self, lineedit):
         """Smart formatting for QLineEdit: show clean 2-decimals for simple values."""
-        try:
-            def format_on_focus_out():
-                try:
-                    text = lineedit.text().strip()
-                    if text:
-                        try:
-                            value = float(text)
-                            if abs(value - round(value)) < 1e-6:
-                                lineedit.setText(f"{int(round(value))}.00")
-                            elif abs(value - round(value, 2)) < 1e-6:
-                                lineedit.setText(f"{value:.2f}")
-                            # Otherwise, leave user's precision as-is
-                        except ValueError:
-                            lineedit.setText('0.00')
-                except:
-                    pass
+        def format_on_focus_out():
+            text = lineedit.text().strip()
+            if not text:
+                return
             try:
-                lineedit.editingFinished.connect(format_on_focus_out)
-            except:
-                pass
-        except Exception as e:
-            print(f"QOLS: Warning - smart formatting setup failed for {getattr(lineedit, 'objectName', lambda: '')()}: {e}")
+                value = float(text)
+                if abs(value - round(value)) < 1e-6:
+                    lineedit.setText(f"{int(round(value))}.00")
+                elif abs(value - round(value, 2)) < 1e-6:
+                    lineedit.setText(f"{value:.2f}")
+            except ValueError:
+                lineedit.setText('0.00')
 
-    def initialize_takeoff_defaults(self):
-        """Initialize default values for Take-Off and other surfaces."""
         try:
-            print("QOLS: Initializing Take-Off Surface default values")
-            takeoff_defaults = {
-                'spin_widthDep_takeoff': 180.0,
-                'spin_maxWidthDep_takeoff': 1800.0,
-                'spin_CWYLength_takeoff': 0.0,
-                'spin_Z0_takeoff': 2548.0
-            }
-            for widget_name, default_value in takeoff_defaults.items():
+            lineedit.editingFinished.connect(format_on_focus_out)
+        except Exception as e:
+            logger.warning(f"Smart formatting setup failed for {lineedit.objectName()}: {e}")
+
+    def initialize_all_numeric_defaults(self):
+        """Initialize default values for all numeric surface widgets from _WIDGET_DEFAULTS."""
+        try:
+            for widget_name, default_value in self._WIDGET_DEFAULTS.items():
                 self.set_numeric_value(widget_name, default_value)
-                print(f"QOLS: Set {widget_name} = {default_value}")
             # Default checkbox checked
             self.check_finalWidth1800_takeoff.setChecked(True)
         except Exception as e:
-            print(f"QOLS: Error initializing Take-Off defaults: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
-        # Transitional defaults
+        # Non-numeric widget initialisation
         try:
-            print("QOLS: Initializing Transitional Surface default values")
-            transitional_defaults = {
-                'spin_widthApp_transitional': '280.00',
-                'spin_Z0_transitional': '2548.00',
-                'spin_ZE_transitional': '2546.50',
-                'spin_ARPH_transitional': '2548.00',
-                'spin_Tslope_transitional': '14.30'
-            }
-            for widget_name, default_value in transitional_defaults.items():
-                self.set_numeric_value(widget_name, default_value)
-                print(f"QOLS: Set {widget_name} = {default_value}")
             self.set_code_value('spin_code_transitional', 4)
-            print("QOLS: Set spin_code_transitional = 4")
             try:
                 self.combo_rwyClassification_transitional.setCurrentText('Precision Approach CAT I')
-                print("QOLS: Set combo_rwyClassification_transitional = Precision Approach CAT I")
             except AttributeError:
-                print("QOLS: combo_rwyClassification_transitional not found")
+                pass
         except Exception as e:
-            print(f"QOLS: Error initializing Transitional defaults: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
-        # Other defaults
+        # Code dropdowns
         try:
-            print("QOLS: Initializing other surface default values")
-            approach_defaults = {
-                'spin_widthApp': 280.0,
-                'spin_Z0': 2548.0,
-                'spin_ZE': 2546.5,
-                'spin_ARPH': 2548.0,
-                'spin_L1': 3000.0,
-                'spin_L2': 3600.0,
-                'spin_LH': 8400.0
-            }
-            conical_defaults = {
-                'spin_L_conical': 6000.0,
-                'spin_height_conical': 60.0
-            }
-            inner_defaults = {
-                'spin_L_inner': 4000.0,
-                'spin_height_inner': 45.0
-            }
-            ofz_defaults = {
-                'spin_width_ofz': 120.0,
-                'spin_Z0_ofz': 2548.0,
-                'spin_ZE_ofz': 2546.5,
-                'spin_ARPH_ofz': 2548.0,
-                'spin_IHSlope_ofz': 33.3
-            }
-            outer_defaults = {
-                'spin_radius_outer': 15000.0,
-                'spin_height_outer': 150.0
-            }
-            all_defaults = {**approach_defaults, **conical_defaults, **inner_defaults, **ofz_defaults, **outer_defaults}
-            for widget_name, default_value in all_defaults.items():
-                self.set_numeric_value(widget_name, default_value)
-                print(f"QOLS: Set {widget_name} = {default_value}")
             # Initialize code dropdowns
             self.set_code_value('spin_code', 4)
             self.set_code_value('spin_code_ofz', 4)
             self.set_code_value('spin_code_takeoff', 4)
             self.set_code_value('spin_code_outer', 4)
-            print("QOLS: Set all code widgets = 4")
             # Apply defaults from table for initial Take-Off code
             try:
                 self.update_takeoff_defaults_from_code()
             except Exception as e:
-                print(f"QOLS: Could not initialize Take-Off defaults: {e}")
-            
+                logger.warning(f"Unhandled error: {e}")
+
             # Initialize RWY Classification dropdowns
             try:
                 self.combo_rwyClassification.setCurrentText('Precision Approach CAT I')
-                print("QOLS: Set combo_rwyClassification = Precision Approach CAT I")
-            except:
-                print("QOLS: combo_rwyClassification not found")
-                
+            except AttributeError:
+                pass
+
             try:
                 self.combo_rwyClassification_ofz.setCurrentText('Precision Approach CAT I')
-                print("QOLS: Set combo_rwyClassification_ofz = Precision Approach CAT I")
-            except:
-                print("QOLS: combo_rwyClassification_ofz not found")
-                
-        except Exception as e:
-            print(f"QOLS: Error initializing other surface defaults: {e}")
+            except AttributeError:
+                pass
 
-    
+        except Exception as e:
+            logger.warning(f"Unhandled error: {e}")
+
+
+    def refresh_defaults(self) -> None:
+        """Public hook for plugin.py to call after a rule-set change (CR-07)."""
+        self._apply_all_defaults()
+
     def _apply_all_defaults(self) -> None:
         """Unified defaults initialisation (M-04).
 
@@ -429,12 +390,13 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
     def _wire_combined_inner_conical_defaults(self):
         """Connect change signals to apply defaults when RWY/Code change in combined tab."""
         try:
-            self.combo_rwyClassification_inner_conical.currentIndexChanged.connect(self.apply_combined_inner_conical_defaults_from_selection)
-            self.spin_code_inner_conical.currentIndexChanged.connect(self.apply_combined_inner_conical_defaults_from_selection)
+            self._connect(self.combo_rwyClassification_inner_conical.currentIndexChanged, self.apply_combined_inner_conical_defaults_from_selection)
+            self._connect(self.spin_code_inner_conical.currentIndexChanged, self.apply_combined_inner_conical_defaults_from_selection)
         except Exception as e:
-            print(f"QOLS: Error wiring defaults for combined Inner/Conical: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     # ICAO Table-based defaults for Combined Inner Horizontal & Conical
+    @pyqtSlot()
     def apply_combined_inner_conical_defaults_from_selection(self):
         """Apply defaults to both Inner Horizontal and Conical using shared classification/code.
 
@@ -452,7 +414,6 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             )
             self.set_numeric_value('spin_L_inner', inner_defaults.get('radius_m', 4000.0))
             self.set_numeric_value('spin_height_inner', inner_defaults.get('height_m', 45.0))
-            print(f"QOLS: Inner Horizontal defaults applied: {rwy}, Code {code} -> Radius={inner_defaults.get('radius_m')}, Height={inner_defaults.get('height_m')}")
 
             # --- Conical defaults (R-01) ---
             # con_rule kept separately so we can distinguish rule-supplied radius_m from ICAO fallback.
@@ -478,14 +439,13 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             else:
                 skip_recalc = False
 
-            print(f"QOLS: Conical defaults applied: {rwy}, Code {code} -> Height={conical_defaults.get('height_m')}, Slope={self.spin_conical_slope.text()}%")
 
             # Recalculate conical radius from height/slope+inner unless the rule provided one
             if not skip_recalc:
                 self.recalculate_conical_radius()
 
         except Exception as e:
-            print(f"QOLS: Error applying combined Inner/Conical defaults: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     # Issue #51: Hide OFZ parameters when RWY Classification is Non-instrument or Non-precision approach
     def update_ofz_visibility(self):
@@ -514,57 +474,54 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             # Show/hide notice label
             self.label_not_applicable_ofz.setVisible(not_applicable)
 
-            print(f"QOLS: OFZ visibility updated - classification='{classification}', not_applicable={not_applicable}")
         except Exception as e:
-            print(f"QOLS: Error updating OFZ visibility: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     # Issue #59: Dynamic selection signal management for true live status
+    @pyqtSlot()
     def connect_layer_selection_signals(self):
         """Connect to selectionChanged signals of current layers for live status updates."""
         try:
             # Disconnect from previously connected layers
             self.disconnect_layer_selection_signals()
-            
+
             runway_layer = self.runwayLayerCombo.currentLayer()
             threshold_layer = self.thresholdLayerCombo.currentLayer()
-            
+
             # Connect to Runway Layer Centerline selection changes
             if runway_layer and isinstance(runway_layer, QgsVectorLayer):
                 runway_layer.selectionChanged.connect(self.update_selection_info)
                 self.connected_runway_layer = runway_layer
-                print(f"QOLS: Connected to Runway Layer Centerline selection signals: {runway_layer.name()}")
-            
-            # Connect to threshold layer selection changes  
+
+            # Connect to threshold layer selection changes
             if threshold_layer and isinstance(threshold_layer, QgsVectorLayer):
                 threshold_layer.selectionChanged.connect(self.update_selection_info)
                 self.connected_threshold_layer = threshold_layer
-                print(f"QOLS: Connected to threshold layer selection signals: {threshold_layer.name()}")
-                
+
         except Exception as e:
-            print(f"QOLS: Error connecting layer selection signals: {e}")
-    
+            logger.warning(f"Unhandled error: {e}")
+
     def disconnect_layer_selection_signals(self):
         """Disconnect from previously connected layer selection signals."""
         try:
             if self.connected_runway_layer:
                 try:
                     self.connected_runway_layer.selectionChanged.disconnect(self.update_selection_info)
-                    print(f"QOLS: Disconnected from Runway Layer Centerline: {self.connected_runway_layer.name()}")
-                except:
+                except RuntimeError:
                     pass  # Signal might not be connected
                 self.connected_runway_layer = None
-                
+
             if self.connected_threshold_layer:
                 try:
                     self.connected_threshold_layer.selectionChanged.disconnect(self.update_selection_info)
-                    print(f"QOLS: Disconnected from threshold layer: {self.connected_threshold_layer.name()}")
-                except:
+                except RuntimeError:
                     pass  # Signal might not be connected
                 self.connected_threshold_layer = None
-                
-        except Exception as e:
-            print(f"QOLS: Error disconnecting layer selection signals: {e}")
 
+        except Exception as e:
+            logger.warning(f"Unhandled error: {e}")
+
+    @pyqtSlot()
     def recalculate_conical_radius(self):
         """Compute Conical Radius = Height / Slope + Inner Horizontal Radius.
         Slope entered as percent. Falls back safely if fields missing.
@@ -576,15 +533,14 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             inner_radius = self.get_numeric_value('spin_L_inner')
             if slope <= 0:
                 # Avoid division by zero; leave radius untouched
-                print("QOLS: Conical slope <= 0, cannot compute radius")
                 return
             computed_radius = height / slope + inner_radius
             self.set_numeric_value('spin_L_conical', computed_radius)
-            print(f"QOLS: Recalculated conical radius = {computed_radius} (height={height}, slope%={slope_pct}, inner={inner_radius})")
         except Exception as e:
-            print(f"QOLS: Error recalculating conical radius: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     # Approach defaults (rules-aware)
+    @pyqtSlot()
     def apply_approach_defaults_from_selection(self):
         try:
             rwy = self.combo_rwyClassification.currentText()
@@ -608,17 +564,16 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             self.set_numeric_value('spin_L1', d['L1_m'])
             self.set_numeric_value('spin_L2', d['L2_m'])
             self.set_numeric_value('spin_LH', d['LH_m'])
-            # Additional dynamic fields (not yet exposed in UI) stored for script usage via globals injection
-            # We can stash them in attributes for later retrieval
-            self._approach_threshold_offset = d['threshold_offset_m']
-            self._approach_divergence_ratio = d['divergence_ratio']
-            self._approach_slope1 = d['first_section_slope']
-            self._approach_slope2 = d['second_section_slope']
-            print(f"QOLS: Approach defaults applied: {rwy} Code {code} -> width={d['width_m']} L1={d['L1_m']} L2={d['L2_m']} LH={d['LH_m']} div={d['divergence_ratio']} thrOff={d['threshold_offset_m']}")
+            self._approach_state = _ApproachState(
+                divergence_ratio=d['divergence_ratio'],
+                slope1=d['first_section_slope'],
+                slope2=d['second_section_slope'],
+                threshold_offset_m=d['threshold_offset_m'],
+            )
         except Exception as e:
-            print(f"QOLS: Error applying approach defaults: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
-    # Transitional defaults (rules-aware)
+    @pyqtSlot()
     def apply_transitional_defaults_from_selection(self):
         try:
             rwy = self.combo_rwyClassification_transitional.currentText()
@@ -627,9 +582,9 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             if rd and 'slope_pct' in rd:
                 self.set_numeric_value('spin_Tslope_transitional', rd['slope_pct'])
         except Exception as e:
-            print(f"QOLS: Error applying transitional defaults: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
-    # OFZ defaults (rules-aware)
+    @pyqtSlot()
     def apply_ofz_defaults_from_selection(self):
         try:
             rwy = self.combo_rwyClassification_ofz.currentText()
@@ -647,11 +602,10 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 bl = rule_mgr.get_balked_landing_defaults(rwy, code) or {}
                 self._ia_defaults = ia
                 self._bl_defaults = bl
-                print(f"QOLS: Cached IA defaults: {ia}; BL defaults: {bl}")
             except Exception as e:
-                print(f"QOLS: Warning caching IA/BL rules for OFZ: {e}")
+                logger.warning(f"Unhandled error: {e}")
         except Exception as e:
-            print(f"QOLS: Error applying OFZ defaults: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     # ------------------------------------------------------------------
     # R-01 — DRY helper: merge rules + ICAO table defaults
@@ -704,17 +658,17 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             widget = getattr(self, widget_name, None)
             if widget is None:
                 return 1  # Default code value
-            
+
             # Handle QComboBox (new code dropdowns)
             if hasattr(widget, 'currentText'):
                 text = widget.currentText().strip()
                 if text:
                     return int(text)
-            
+
             # Handle QSpinBox (legacy code widgets)
             if hasattr(widget, 'value'):
                 return widget.value()
-                
+
             return 1  # Default code value
         except (ValueError, AttributeError):
             return 1  # Default code value
@@ -724,37 +678,31 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         try:
             widget = getattr(self, widget_name, None)
             if widget is None:
-                print(f"QOLS: Warning - code widget {widget_name} not found")
                 return
-            
+
             # Handle QComboBox (new code dropdowns)
             if hasattr(widget, 'setCurrentText'):
                 widget.setCurrentText(str(value))
-                print(f"QOLS: Set {widget_name} (QComboBox) = {value}")
                 return
-            
+
             # Handle QSpinBox (legacy code widgets)
             if hasattr(widget, 'setValue'):
                 widget.setValue(value)
-                print(f"QOLS: Set {widget_name} (QSpinBox) = {value}")
                 return
-                
-            print(f"QOLS: Warning - {widget_name} is neither QComboBox nor QSpinBox")
+
         except Exception as e:
-            print(f"QOLS: Error setting code value for {widget_name}: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def set_numeric_value(self, widget_name, value):
         """Set numeric value in widget - works with both QLineEdit and QDoubleSpinBox."""
         try:
             widget = getattr(self, widget_name, None)
             if widget is None:
-                print(f"QOLS: Warning - widget {widget_name} not found")
                 return
-                
-            if hasattr(widget, 'setValue'):  # QDoubleSpinBox or QSpinBox
+
+            if hasattr(widget, 'setValue'):
                 widget.setValue(float(value))
-                print(f"QOLS: Set {widget_name} = {value} (using setValue)")
-            elif hasattr(widget, 'setText'):  # QLineEdit
+            elif hasattr(widget, 'setText'):
                 if isinstance(value, (int, float)):
                     if abs(value - round(value)) < 0.000001:
                         widget.setText(f"{int(round(value))}.00")
@@ -762,12 +710,10 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                         widget.setText(f"{value:.8f}".rstrip('0').rstrip('.'))
                 else:
                     widget.setText(str(value))
-                print(f"QOLS: Set {widget_name} = {value} (using setText)")
             else:
-                print(f"QOLS: Warning - widget {widget_name} has no setValue or setText method")
-                
+                logger.warning(f"Widget {widget_name} has no setValue or setText method")
         except Exception as e:
-            print(f"QOLS: Warning - could not set value for {widget_name}: {e}")
+            logger.warning(f"Could not set value for {widget_name}: {e}")
 
     def force_clean_display(self):
         """
@@ -775,181 +721,141 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         Se ejecuta múltiples veces hasta que funcione.
         """
         try:
-            print("QOLS: FORCING clean display with AGGRESSIVE approach")
-            
-            # Lista de campos críticos que aparecen con muchos decimales
-            critical_fields = [
-                ('spin_L_conical', 6000.0),      # 6000.000000 → 6000.00
-                ('spin_height_conical', 60.0),   # 60.000000 → 60.00
-                ('spin_L_inner', 4000.0),        # 4000.000000 → 4000.00  
-                ('spin_height_inner', 45.0)      # 45.000000 → 45.00
-            ]
-            
-            # NUEVO: Campos de Take-Off Surface que deben mantener valores por defecto
-            takeoff_fields = [
-                ('spin_widthDep_takeoff', 180.0),
-                ('spin_maxWidthDep_takeoff', 1800.0),
-                ('spin_CWYLength_takeoff', 0.0),
-                ('spin_Z0_takeoff', 2548.0)
-            ]
-            
-            # Combinar todos los campos críticos
-            all_critical_fields = critical_fields + takeoff_fields
-            
-            for name, expected_value in all_critical_fields:
+            # Subset of _WIDGET_DEFAULTS that are prone to many-decimal display artifacts
+            _force_clean_names = (
+                'spin_L_conical', 'spin_height_conical', 'spin_L_inner', 'spin_height_inner',
+                'spin_widthDep_takeoff', 'spin_maxWidthDep_takeoff', 'spin_CWYLength_takeoff', 'spin_Z0_takeoff',
+            )
+            for name in _force_clean_names:
+                expected_value = self._WIDGET_DEFAULTS[name]
                 try:
                     # For QLineEdit widgets (all numeric inputs)
                     widget = getattr(self, name, None)
                     if widget and hasattr(widget, 'setText'):
                         current_text = widget.text()
-                        
+
                         # Format expected value cleanly
                         if abs(expected_value - round(expected_value)) < 1e-9:
                             clean_text = f"{int(round(expected_value))}.00"
                         else:
                             clean_text = f"{expected_value:.2f}"
-                        
+
                         # Only update if empty or different
                         if not current_text or current_text != clean_text:
                             widget.setText(clean_text)
                             widget.update()
-                            print(f"QOLS: FORCE QLineEdit {name}: '{current_text}' → '{clean_text}'")
-                        
+
                 except Exception as e:
-                    print(f"QOLS: Error aggressive forcing {name}: {e}")
-            
+                    logger.warning(f"Unhandled error: {e}")
+
             # Note: Nuclear method section removed - no longer needed since all widgets are QLineEdit
-            
-            print("QOLS: AGGRESSIVE clean display completed")
-            
+
+
         except Exception as e:
-            print(f"QOLS: Error in aggressive force_clean_display: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def setup_layer_filters(self):
         """Configure layer combo boxes with geometry-specific filtering."""
         try:
-            print("QOLS: Setting up layer filters")
-            
+
             # Configure Runway Layer Centerline combo - only show LINE geometry layers
             self.runwayLayerCombo.setFilters(QgsMapLayerProxyModel.VectorLayer)
             self.runwayLayerCombo.setExceptedLayerList([])
             # Enable additional display options for runway combo
             self.runwayLayerCombo.setShowCrs(False)
             self.runwayLayerCombo.setAllowEmptyLayer(False)
-            
-            # Configure threshold layer combo - only show POINT geometry layers  
+
+            # Configure threshold layer combo - only show POINT geometry layers
             self.thresholdLayerCombo.setFilters(QgsMapLayerProxyModel.VectorLayer)
             self.thresholdLayerCombo.setExceptedLayerList([])
             # Enable additional display options for threshold combo
             self.thresholdLayerCombo.setShowCrs(False)
             self.thresholdLayerCombo.setAllowEmptyLayer(False)
-            
+
             # Apply geometry filtering
             self.apply_geometry_filters()
-            
+
             # Connect to layer changes to reapply filters (tracked for closeEvent teardown)
             self._connect(QgsProject.instance().layersAdded, self.apply_geometry_filters)
             self._connect(QgsProject.instance().layersRemoved, self.apply_geometry_filters)
-            
-            print("QOLS: Layer filters configured successfully")
-            
+
+
         except Exception as e:
-            print(f"QOLS: Error setting up layer filters: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def apply_geometry_filters(self):
         """Apply geometry-specific filters to layer combo boxes."""
         try:
             # Get all vector layers
-            vector_layers = [layer for layer in QgsProject.instance().mapLayers().values() 
+            vector_layers = [layer for layer in QgsProject.instance().mapLayers().values()
                            if isinstance(layer, QgsVectorLayer)]
-            
+
             # Filter Runway Layer Centerline layers - only show LINE geometry
             runway_excluded = []
             threshold_excluded = []
-            
+
             for layer in vector_layers:
                 if layer.geometryType() != QgsWkbTypes.LineGeometry:
                     runway_excluded.append(layer)
-                    
+
                 if layer.geometryType() != QgsWkbTypes.PointGeometry:
                     threshold_excluded.append(layer)
-            
+
             # Apply exclusion lists
             self.runwayLayerCombo.setExceptedLayerList(runway_excluded)
             self.thresholdLayerCombo.setExceptedLayerList(threshold_excluded)
-            
-            print(f"QOLS: Applied geometry filters - Runway excluded: {len(runway_excluded)}, Threshold excluded: {len(threshold_excluded)}")
-            
+
+
         except Exception as e:
-            print(f"QOLS: Error applying geometry filters: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def setup_dropdown_tooltips(self):
-        """Setup enhanced tooltips for dropdown items - QGIS native styling only."""
+        """Setup enhanced tooltips for dropdown items."""
         try:
-            print("QOLS: Setting up dropdown tooltips with native QGIS styling")
-            
-            # Apply MINIMAL CSS fix only for hover text visibility
-            hover_fix_style = """
-            QgsMapLayerComboBox QAbstractItemView::item:hover {
-                color: black !important;
-                background-color: #0078d4 !important;
-            }
-            
-            QgsMapLayerComboBox QAbstractItemView::item:selected {
-                color: black !important;
-            }
-            """
-            
-            # Apply only the hover text fix - keep everything else native
-            self.runwayLayerCombo.setStyleSheet(hover_fix_style)
-            self.thresholdLayerCombo.setStyleSheet(hover_fix_style)
-            
-            # Connect to layer addition/removal to update item tooltips
-            QgsProject.instance().layersAdded.connect(self.update_dropdown_item_tooltips)
-            QgsProject.instance().layersRemoved.connect(self.update_dropdown_item_tooltips)
-            
-            # Also connect to model changes in the combos themselves
-            self.runwayLayerCombo.layerChanged.connect(self.update_dropdown_item_tooltips)
-            self.thresholdLayerCombo.layerChanged.connect(self.update_dropdown_item_tooltips)
-            
+            # CR-04: route through _connect() so teardown in closeEvent covers these
+            # CR-05: stylesheet is applied once in setup_enhanced_combos; not repeated here
+            self._connect(QgsProject.instance().layersAdded, self.update_dropdown_item_tooltips)
+            self._connect(QgsProject.instance().layersRemoved, self.update_dropdown_item_tooltips)
+            self._connect(self.runwayLayerCombo.layerChanged, self.update_dropdown_item_tooltips)
+            self._connect(self.thresholdLayerCombo.layerChanged, self.update_dropdown_item_tooltips)
+
             # Connect to mouse events on the dropdown views for real-time tooltip updates
             try:
                 runway_view = self.runwayLayerCombo.view()
                 threshold_view = self.thresholdLayerCombo.view()
-                
+
                 # Set mouse tracking to capture hover events
                 runway_view.setMouseTracking(True)
                 threshold_view.setMouseTracking(True)
-                
+
                 # Install event filters for hover detection
                 runway_view.installEventFilter(self)
                 threshold_view.installEventFilter(self)
-                
+
             except Exception as e:
-                print(f"QOLS: Could not setup hover event detection: {e}")
-            
+                logger.warning(f"Unhandled error: {e}")
+
             # Set initial item tooltips
             self.update_dropdown_item_tooltips()
-            
+
         except Exception as e:
-            print(f"QOLS: Error setting up dropdown tooltips: {e}")
-    
+            logger.warning(f"Unhandled error: {e}")
+
     def update_dropdown_item_tooltips(self):
-        """Update tooltips for individual dropdown items - native QGIS styling only.""" 
+        """Update tooltips for individual dropdown items - native QGIS styling only."""
         try:
             # Reduce logging frequency - only log when layers change
             current_runway_count = self.runwayLayerCombo.count()
             current_threshold_count = self.thresholdLayerCombo.count()
-            
+
             # Only proceed if layer counts have changed
-            if (current_runway_count == self._last_runway_count and 
+            if (current_runway_count == self._last_runway_count and
                 current_threshold_count == self._last_threshold_count):
                 return  # No changes, skip update
-            
-            print(f"QOLS: Updating tooltips - Runway: {current_runway_count}, Threshold: {current_threshold_count}")
+
             self._last_runway_count = current_runway_count
             self._last_threshold_count = current_threshold_count
-            
+
             # Force update tooltips using multiple methods for maximum compatibility
             try:
                 # Update runway combo tooltips - focus on tooltip data only
@@ -960,17 +866,17 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                         geom_type = self.get_geometry_type_name(layer)
                         feature_count = layer.featureCount()
                         tooltip = f"Layer: {layer.name()}\nType: {geom_type}\nFeatures: {feature_count}"
-                        
+
                         # Method 1: Set via model data (most reliable for QgsMapLayerComboBox)
                         index = runway_model.index(i, 0)
                         runway_model.setData(index, tooltip, TOOLTIP_ROLE)
-                        
+
                         # Method 2: Set via item data (backup method)
                         try:
                             self.runwayLayerCombo.setItemData(i, tooltip, TOOLTIP_ROLE)
-                        except:
+                        except (AttributeError, TypeError):
                             pass
-                
+
                 # Update threshold combo tooltips - focus on tooltip data only
                 threshold_model = self.thresholdLayerCombo.model()
                 for i in range(self.thresholdLayerCombo.count()):
@@ -979,48 +885,46 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                         geom_type = self.get_geometry_type_name(layer)
                         feature_count = layer.featureCount()
                         tooltip = f"Layer: {layer.name()}\nType: {geom_type}\nFeatures: {feature_count}"
-                        
+
                         # Method 1: Set via model data (most reliable for QgsMapLayerComboBox)
                         index = threshold_model.index(i, 0)
                         threshold_model.setData(index, tooltip, TOOLTIP_ROLE)
-                        
+
                         # Method 2: Set via item data (backup method)
                         try:
                             self.thresholdLayerCombo.setItemData(i, tooltip, TOOLTIP_ROLE)
-                        except:
+                        except (AttributeError, TypeError):
                             pass
-                
+
                 # Force view refresh to ensure tooltips are applied
                 try:
                     self.runwayLayerCombo.view().update()
                     self.thresholdLayerCombo.view().update()
-                except:
+                except AttributeError:
                     pass
-                
-                print("QOLS: Tooltips updated successfully")
-                
+
+
             except Exception as e:
-                print(f"QOLS: Error in tooltip update details: {e}")
-                
+                logger.warning(f"Unhandled error: {e}")
+
         except Exception as e:
-            print(f"QOLS: Error updating dropdown item tooltips: {e}")
-            traceback.print_exc()
-    
+            logger.error(f"update_dropdown_item_tooltips failed: {e}\n{traceback.format_exc()}")
+
     def get_geometry_type_name(self, layer):
         """Get readable geometry type name."""
         try:
             geom_type = layer.geometryType()
-            if geom_type == 0:  # QgsWkbTypes.PointGeometry
+            if geom_type == QgsWkbTypes.PointGeometry:
                 return "Point"
-            elif geom_type == 1:  # QgsWkbTypes.LineGeometry
+            elif geom_type == QgsWkbTypes.LineGeometry:
                 return "LineString"
-            elif geom_type == 2:  # QgsWkbTypes.PolygonGeometry
+            elif geom_type == QgsWkbTypes.PolygonGeometry:
                 return "Polygon"
             else:
                 return "Unknown"
-        except:
+        except Exception:
             return "Unknown"
-    
+
     def eventFilter(self, obj, event):
         """Handle events for dropdown hover tooltips - Native QGIS styling only."""
         try:
@@ -1038,96 +942,50 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                             geom_type = self.get_geometry_type_name(layer)
                             feature_count = layer.featureCount()
                             tooltip = f"Layer: {layer.name()}\nType: {geom_type}\nFeatures: {feature_count}"
-                            
+
                             # Method 1: Set tooltip on the view (native QGIS style)
                             obj.setToolTip(tooltip)
-                            
+
                             # Method 2: Force show tooltip at mouse position (native QGIS style)
                             QToolTip.showText(event.globalPos(), tooltip, obj)
-                            
+
                         return False  # Let the event propagate normally
                     else:
                         # Mouse not over an item, hide tooltip
                         obj.setToolTip("")
                         QToolTip.hideText()
-                            
+
         except Exception as e:
-            print(f"QOLS: Error in eventFilter: {e}")
-            
+            logger.warning(f"Unhandled error: {e}")
+
         # Call the base implementation for all other events
         return super().eventFilter(obj, event)
 
     def setup_enhanced_combos(self):
-        """Setup enhanced combo boxes with minimal styling."""
+        """Reset combo boxes to default QGIS theme styling (no hardcoded colors)."""
         try:
-            print("QOLS: Setting up enhanced combo styling")
-            
-            # Note: Tooltips are handled by setup_dropdown_tooltips() for individual items
-            # No need to set combo-level tooltips as they override item tooltips
-            
-            # Apply minimal styling - solo indicadores de color, resto nativo
-            minimal_combo_style = """
-                /* Styling mínimo - mantener apariencia nativa de QGIS */
-                QgsMapLayerComboBox {
-                    border: 1px solid #bdc3c7;
-                    border-radius: 4px;
-                    padding: 2px 4px;
-                    font-size: 9pt;
-                    background-color: white;
-                }
-                
-                QgsMapLayerComboBox:hover {
-                    border-color: #3498db;
-                    background-color: #f8f9fa;
-                }
-                
-                /* Tooltip styling for visibility */
-                QToolTip {
-                    background-color: #ffffcc;
-                    color: #000000;
-                    border: 1px solid #cccccc;
-                    padding: 5px;
-                    border-radius: 3px;
-                    font-size: 10pt;
-                }
-                
-                /* Solo indicadores de color para diferenciación */
-                QgsMapLayerComboBox#runwayLayerCombo {
-                    border-left: 3px solid #3498db;
-                }
-                
-                QgsMapLayerComboBox#thresholdLayerCombo {
-                    border-left: 3px solid #e67e22;
-                }
-            """
-            
-            # Apply the minimal styling
-            self.runwayLayerCombo.setStyleSheet(minimal_combo_style)
-            self.thresholdLayerCombo.setStyleSheet(minimal_combo_style)
-            
-            print("QOLS: Minimal combo styling applied successfully")
-            
+            # Clear any inline stylesheets so the active QGIS theme (dark/light) owns rendering.
+            self.runwayLayerCombo.setStyleSheet("")
+            self.thresholdLayerCombo.setStyleSheet("")
         except Exception as e:
-            print(f"QOLS: Error setting up enhanced combos: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
+    @pyqtSlot()
     def update_selection_info(self):
         """Update selection information in real-time with improved individual feedback."""
         try:
-            print("QOLS: update_selection_info called")
             runway_layer = self.runwayLayerCombo.currentLayer()
             threshold_layer = self.thresholdLayerCombo.currentLayer()
-            
+
             use_runway_selected = self.useSelectedRunwayCheckBox.isChecked()
             use_threshold_selected = self.useSelectedThresholdCheckBox.isChecked()
-            
-            print(f"QOLS: runway_layer = {runway_layer.name() if runway_layer else 'None'}")
-            print(f"QOLS: threshold_layer = {threshold_layer.name() if threshold_layer else 'None'}")
-            
+
+
             # Update runway info
             if runway_layer:
                 runway_selected = len(runway_layer.selectedFeatures())
                 runway_total = runway_layer.featureCount()
-                
+
                 if use_runway_selected:
                     if runway_selected > 0:
                         runway_info = f"• Using {runway_selected} of {runway_total} selected"
@@ -1141,12 +999,12 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             else:
                 runway_info = "x No layer selected"
                 runway_status = "No layer"
-            
+
             # Update threshold info
             if threshold_layer:
                 threshold_selected = len(threshold_layer.selectedFeatures())
                 threshold_total = threshold_layer.featureCount()
-                
+
                 if use_threshold_selected:
                     if threshold_selected > 0:
                         threshold_info = f"• Using {threshold_selected} of {threshold_total} selected"
@@ -1160,53 +1018,59 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             else:
                 threshold_info = "x No layer selected"
                 threshold_status = "No layer"
-            print(f"QOLS: runway_status = {runway_status}")
-            print(f"QOLS: threshold_status = {threshold_status}")
-            
-            # Individual status icons for each layer (using beautiful emojis for live status)
+
+            # Detect active theme (dark vs light) to pick readable label colors.
+            _is_dark = QApplication.palette().window().color().lightness() < 128
+            _c_warn  = "#FFA726" if _is_dark else "#E65100"  # orange
+            _c_ok    = "#66BB6A" if _is_dark else "#2E7D32"  # green
+            _c_err   = "#EF5350" if _is_dark else "#C62828"  # red
+            _base_style = "font-weight: bold; font-size: 11px;"
+
             if "All" in runway_status:
-                runway_icon = "⚠️"  # Warning for "All" - caution about using all features
+                runway_icon = "⚠"
+                runway_style = f"QLabel {{ color: {_c_warn}; {_base_style} }}"
             elif "Selected" in runway_status:
-                runway_icon = "✅"  # Success for "Selected" - recommended approach
+                runway_icon = "✔"
+                runway_style = f"QLabel {{ color: {_c_ok}; {_base_style} }}"
             else:
-                runway_icon = "❌"
-            
+                runway_icon = "✘"
+                runway_style = f"QLabel {{ color: {_c_err}; {_base_style} }}"
+
             if "All" in threshold_status:
-                threshold_icon = "⚠️"  # Warning for "All" - caution about using all features
+                threshold_icon = "⚠"
+                threshold_style = f"QLabel {{ color: {_c_warn}; {_base_style} }}"
             elif "Selected" in threshold_status:
-                threshold_icon = "✅"  # Success for "Selected" - recommended approach
+                threshold_icon = "✔"
+                threshold_style = f"QLabel {{ color: {_c_ok}; {_base_style} }}"
             else:
-                threshold_icon = "❌"
-            
-            # Update per-layer labels (Issue #52 UI change)
+                threshold_icon = "✘"
+                threshold_style = f"QLabel {{ color: {_c_err}; {_base_style} }}"
+
+            # Update per-layer labels
             try:
                 self.runwaySelectionStatusLabel.setText(f"{runway_icon} {runway_status}")
+                self.runwaySelectionStatusLabel.setStyleSheet(runway_style)
                 self.thresholdSelectionStatusLabel.setText(f"{threshold_icon} {threshold_status}")
+                self.thresholdSelectionStatusLabel.setStyleSheet(threshold_style)
             except Exception as e:
-                print(f"QOLS: Error updating per-layer selection labels: {e}")
-            
+                logger.warning(f"Unhandled error: {e}")
+
             # Update dropdown tooltips with current layer info
             self.update_dropdown_item_tooltips()
-            
-            print("QOLS: update_selection_info completed successfully")
-            
+
+
         except Exception as e:
-            print(f"QOLS: Error in update_selection_info: {e}")
-            traceback.print_exc()
-            
+            logger.error(f"update_selection_info failed: {e}\n{traceback.format_exc()}")
+
             # Fallback text in case of error
-            # Attempt to mark error on per-layer labels
             try:
                 self.runwaySelectionStatusLabel.setText("❌ Error")
                 self.thresholdSelectionStatusLabel.setText("❌ Error")
-            except:
+            except (AttributeError, RuntimeError):
                 pass
 
     def update_takeoff_defaults_from_code(self):
-        """Apply default values from the ICAO table for Take-Off based on code.
-        If user has already typed values, do not override their inputs; only fill when empty.
-    El ancho final por defecto se toma de la tabla del código y es editable por el usuario.
-        """
+        """Apply default values from the ICAO table for Take-Off based on code."""
         try:
             code_value = self.get_code_value('spin_code_takeoff')
 
@@ -1229,7 +1093,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             set_value('spin_surfaceLength_takeoff', t['length'])
             set_value('spin_slope_takeoff', t['slope_pct'])
 
-            # Update max width por defecto del código (editable)
+            # Update max width — default from code table, editable by user
             # If Code 3/4, respect the checkbox setting; otherwise use table value
             if code_value in [3, 4] and self.check_finalWidth1800_takeoff.isChecked():
                 self.spin_maxWidthDep_takeoff.setText("1800.0")
@@ -1238,11 +1102,10 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             else:
                 self.spin_maxWidthDep_takeoff.setText(f"{t['final_width']:.1f}")
 
-            print(f"QOLS: Applied Take-Off defaults from table for code {code_value}")
             # Update visibility of checkbox control based on code
             self.update_takeoff_final_width_controls()
         except Exception as e:
-            print(f"QOLS: Error applying Take-Off defaults: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def update_takeoff_final_width_controls(self):
         """Show the 1800/1200 checkbox only for Code 3/4 and apply its value to max width if applicable."""
@@ -1257,7 +1120,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 else:
                     self.set_numeric_value('spin_maxWidthDep_takeoff', 1200.0)
         except Exception as e:
-            print(f"QOLS: Error updating take-off final width controls: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def on_final_width_checkbox_toggled(self, checked: bool):
         """When the checkbox is toggled, update the max width for Code 3/4."""
@@ -1266,7 +1129,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             if code_value in [3, 4]:
                 self.set_numeric_value('spin_maxWidthDep_takeoff', 1800.0 if checked else 1200.0)
         except Exception as e:
-            print(f"QOLS: Error handling final width checkbox toggle: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
 
     def validate_layer_change(self):
@@ -1274,7 +1137,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         try:
             runway_layer = self.runwayLayerCombo.currentLayer()
             threshold_layer = self.thresholdLayerCombo.currentLayer()
-            
+
             # Validate Runway Layer Centerline
             if runway_layer:
                 if runway_layer.geometryType() != QgsWkbTypes.LineGeometry:
@@ -1287,7 +1150,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     # Reset to no selection
                     self.runwayLayerCombo.setLayer(None)
                     return
-            
+
             # Validate threshold layer
             if threshold_layer:
                 if threshold_layer.geometryType() != QgsWkbTypes.PointGeometry:
@@ -1300,22 +1163,21 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     # Reset to no selection
                     self.thresholdLayerCombo.setLayer(None)
                     return
-            
+
             # If both layers are valid, update status
             self.update_selection_info()
-            
+
         except Exception as e:
-            print(f"QOLS: Error in layer change validation: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def get_layer_geometry_info(self, layer):
         """Get human-readable geometry type information for a layer."""
         try:
             if not isinstance(layer, QgsVectorLayer):
                 return "Not a vector layer"
-                
+
             geom_type = layer.geometryType()
-            wkb_type = layer.wkbType()
-            
+
             if geom_type == QgsWkbTypes.PointGeometry:
                 return "Point"
             elif geom_type == QgsWkbTypes.LineGeometry:
@@ -1324,27 +1186,27 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 return "Polygon"
             else:
                 return f"Unknown ({geom_type})"
-                
+
         except Exception as e:
             return f"Error: {e}"
 
     def get_layer_summary(self):
         """Get summary of available layers for debugging."""
         try:
-            vector_layers = [layer for layer in QgsProject.instance().mapLayers().values() 
+            vector_layers = [layer for layer in QgsProject.instance().mapLayers().values()
                            if isinstance(layer, QgsVectorLayer)]
-            
+
             summary = []
             summary.append("=== LAYER SUMMARY ===")
-            
+
             line_layers = []
             point_layers = []
             polygon_layers = []
             other_layers = []
-            
+
             for layer in vector_layers:
                 layer_info = f"'{layer.name()}' ({self.get_layer_geometry_info(layer)}, {layer.featureCount()} features)"
-                
+
                 if layer.geometryType() == QgsWkbTypes.LineGeometry:
                     line_layers.append(layer_info)
                 elif layer.geometryType() == QgsWkbTypes.PointGeometry:
@@ -1353,27 +1215,27 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     polygon_layers.append(layer_info)
                 else:
                     other_layers.append(layer_info)
-            
+
             summary.append(f"LINE layers (for Runway): {len(line_layers)}")
             for layer_info in line_layers:
                 summary.append(f"  • {layer_info}")
-            
+
             summary.append(f"POINT layers (for Threshold): {len(point_layers)}")
             for layer_info in point_layers:
                 summary.append(f"  • {layer_info}")
-            
+
             if polygon_layers:
                 summary.append(f"POLYGON layers (not usable): {len(polygon_layers)}")
                 for layer_info in polygon_layers:
                     summary.append(f"  • {layer_info}")
-            
+
             if other_layers:
                 summary.append(f"OTHER geometry layers: {len(other_layers)}")
                 for layer_info in other_layers:
                     summary.append(f"  • {layer_info}")
-            
+
             return "\n".join(summary)
-            
+
         except Exception as e:
             return f"Error getting layer summary: {e}"
 
@@ -1403,6 +1265,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             self.button_rotate_transitional.setText("🔄 Inverted Runway Direction")
             self.button_rotate_transitional.setChecked(True)
 
+    @pyqtSlot(int)
     def on_tab_changed(self, index):
         """Handle tab changes to ensure defaults are set properly."""
         try:
@@ -1410,92 +1273,63 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             current_tab = self.scriptTabWidget.widget(index)
             if current_tab:
                 tab_name = current_tab.objectName()
-                print(f"QOLS: Tab changed to: {tab_name}")
-                
-                # Reinitialize defaults for Transitional tab specifically
+
                 if 'transitional' in tab_name.lower():
-                    print("QOLS: Transitional tab selected - ensuring defaults are set")
-                    # Force set defaults again (helpful for widget visibility issues)
-                    QTimer.singleShot(100, self.force_transitional_defaults)
-                    
+                    self.apply_transitional_defaults_from_selection()
+
         except Exception as e:
-            print(f"QOLS: Error in tab change handler: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def force_transitional_defaults(self):
         """Force set Transitional Surface default values."""
         try:
-            print("QOLS: Force setting Transitional Surface defaults")
-            
-            # Transitional Surface default values (from original script)
-            transitional_defaults = {
-                'spin_widthApp_transitional': '280.00',
-                'spin_Z0_transitional': '2548.00',
-                'spin_ZE_transitional': '2546.50',
-                'spin_ARPH_transitional': '2548.00',
-                'spin_IHSlope_transitional': '33.30',
-                'spin_Tslope_transitional': '14.30'
-            }
-            
-            # Force set each value using setText for QLineEdit widgets
-            for widget_name, default_value in transitional_defaults.items():
-                try:
-                    widget = getattr(self, widget_name, None)
-                    if widget and hasattr(widget, 'setText'):
-                        widget.setText(default_value)
-                        print(f"QOLS: Set {widget_name} = {default_value}")
-                    elif widget and hasattr(widget, 'setValue'):
-                        widget.setValue(float(default_value))
-                        print(f"QOLS: Set {widget_name} = {default_value} (setValue)")
-                    else:
-                        print(f"QOLS: Widget {widget_name} not found or no setText/setValue")
-                except Exception as e:
-                    print(f"QOLS: Error setting {widget_name}: {e}")
-                
+            for name, value in self._WIDGET_DEFAULTS.items():
+                if 'transitional' in name:
+                    try:
+                        self.set_numeric_value(name, value)
+                    except Exception as e:
+                        logger.warning(f"Error setting {name}: {e}")
+
             # Set code and type (these are QComboBox)
             try:
                 self.set_code_value('spin_code_transitional', 4)
-                print("QOLS: Set code = 4")
             except Exception as e:
-                print(f"QOLS: Error setting code: {e}")
-                
+                logger.warning(f"Unhandled error: {e}")
+
             try:
                 self.combo_rwyClassification_transitional.setCurrentText('Precision Approach CAT I')
-                print("QOLS: Set typeAPP = CAT I")
             except AttributeError as e:
-                print(f"QOLS: combo_rwyClassification_transitional not found: {e}")
-                
-            print("QOLS: Transitional defaults forced successfully")
-            
-        except Exception as e:
-            print(f"QOLS: Error forcing transitional defaults: {e}")
+                logger.warning(f"Unhandled error: {e}")
 
+
+        except Exception as e:
+            logger.warning(f"Unhandled error: {e}")
+
+    @pyqtSlot()
     def on_calculate_clicked(self):
         """Handle calculate button click with validation."""
         try:
-            print("QOLS: Calculate button clicked")
-            
+
             # Validate layers
             if not self.validate_layers():
                 return
-            
+
             # Show friendly message
             self.show_info_message("Starting calculation...")
-            
+
             # Emit signal
             self.calculateClicked.emit()
-            
+
         except Exception as e:
-            print(f"QOLS: Error in calculate clicked: {e}")
             self.show_error_message(f"Error starting calculation: {str(e)}")
 
     def validate_layers(self):
         """Validate that required layers are selected with correct geometry types - ULTRA ROBUST VERSION."""
         try:
-            print("QOLS: Starting comprehensive layer validation...")
-            
+
             runway_layer = self.runwayLayerCombo.currentLayer()
             threshold_layer = self.thresholdLayerCombo.currentLayer()
-            
+
             # CRITICAL CHECK 1: Ensure layers are selected
             if not runway_layer:
                 self.show_error_message(
@@ -1504,7 +1338,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     "The Runway Layer Centerline must contain LINE geometry (runway lines)."
                 )
                 return False
-            
+
             if not threshold_layer:
                 self.show_error_message(
                     "No Threshold Layer Selected!\n\n"
@@ -1512,7 +1346,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     "The threshold layer must contain POINT geometry (threshold points)."
                 )
                 return False
-            
+
             # CRITICAL CHECK 2: Ensure layers are valid QGIS objects
             if not isinstance(runway_layer, QgsVectorLayer):
                 self.show_error_message(
@@ -1521,7 +1355,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please select a different Runway Layer Centerline."
                 )
                 return False
-            
+
             if not isinstance(threshold_layer, QgsVectorLayer):
                 self.show_error_message(
                     f"Invalid Threshold Layer Object!\n\n"
@@ -1529,7 +1363,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please select a different threshold layer."
                 )
                 return False
-            
+
             # CRITICAL CHECK 3: Ensure layers are still in project
             project_layers = list(QgsProject.instance().mapLayers().values())
             if runway_layer not in project_layers:
@@ -1539,7 +1373,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"It may have been removed. Please select a different Runway Layer Centerline."
                 )
                 return False
-            
+
             if threshold_layer not in project_layers:
                 self.show_error_message(
                     f"Threshold Layer Not Found!\n\n"
@@ -1547,7 +1381,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"It may have been removed. Please select a different threshold layer."
                 )
                 return False
-            
+
             # CRITICAL CHECK 4: Ensure layers are valid and accessible
             if not runway_layer.isValid():
                 self.show_error_message(
@@ -1556,7 +1390,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please check the layer source and select a different Runway Layer Centerline."
                 )
                 return False
-            
+
             if not threshold_layer.isValid():
                 self.show_error_message(
                     f"Corrupted Threshold Layer!\n\n"
@@ -1564,7 +1398,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please check the layer source and select a different threshold layer."
                 )
                 return False
-            
+
             # CRITICAL CHECK 5: Validate Runway Layer Centerline geometry (must be LINE)
             if runway_layer.geometryType() != QgsWkbTypes.LineGeometry:
                 runway_geom_type = self.get_layer_geometry_info(runway_layer)
@@ -1576,7 +1410,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please select a layer containing runway lines."
                 )
                 return False
-            
+
             # CRITICAL CHECK 6: Validate threshold layer geometry (must be POINT)
             if threshold_layer.geometryType() != QgsWkbTypes.PointGeometry:
                 threshold_geom_type = self.get_layer_geometry_info(threshold_layer)
@@ -1588,11 +1422,11 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please select a layer containing threshold points."
                 )
                 return False
-            
+
             # CRITICAL CHECK 7: Ensure layers contain features
             runway_total = runway_layer.featureCount()
             threshold_total = threshold_layer.featureCount()
-            
+
             if runway_total == 0:
                 self.show_error_message(
                     f"Empty Runway Layer Centerline!\n\n"
@@ -1600,7 +1434,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please select a Runway Layer Centerline with runway line features."
                 )
                 return False
-            
+
             if threshold_total == 0:
                 self.show_error_message(
                     f"Empty Threshold Layer!\n\n"
@@ -1608,11 +1442,11 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     f"Please select a threshold layer with threshold point features."
                 )
                 return False
-            
+
             # CRITICAL CHECK 8: Validate selected features if required
             use_runway_selected = self.useSelectedRunwayCheckBox.isChecked()
             use_threshold_selected = self.useSelectedThresholdCheckBox.isChecked()
-            
+
             # Validate runway selection
             if use_runway_selected:
                 runway_selected = len(runway_layer.selectedFeatures())
@@ -1625,11 +1459,8 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                         f"• Uncheck 'Use Selected Runway Features' to use all runway features"
                     )
                     return False
-                print(f"QOLS: Using {runway_selected} selected runway features")
-            else:
-                print(f"QOLS: Using all {runway_total} runway features")
-            
-            # Validate threshold selection  
+
+            # Validate threshold selection
             if use_threshold_selected:
                 threshold_selected = len(threshold_layer.selectedFeatures())
                 if threshold_selected == 0:
@@ -1641,59 +1472,33 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                         f"• Uncheck 'Use Selected Threshold Features' to use all threshold features"
                     )
                     return False
-                print(f"QOLS: Using {threshold_selected} selected threshold features")
-            else:
-                print(f"QOLS: Using all {threshold_total} threshold features")
-            
-            # SUCCESS: All validations passed
-            print(f"QOLS: ✅ ALL VALIDATIONS PASSED")
-            print(f"QOLS: Runway Layer Centerline: '{runway_layer.name()}' (LINE geometry, {runway_total} features)")
-            print(f"QOLS: Threshold Layer: '{threshold_layer.name()}' (POINT geometry, {threshold_total} features)")
-            print(f"QOLS: Selection Mode: Runway={'selected' if use_runway_selected else 'all'}, Threshold={'selected' if use_threshold_selected else 'all'}")
-            
+
             return True
-            
+
         except Exception as e:
-            print(f"QOLS: CRITICAL ERROR in layer validation: {e}")
-            traceback.print_exc()
+            logger.error(f"validate_layers unexpected error: {e}\n{traceback.format_exc()}")
             self.show_error_message(
                 f"Critical Validation Error!\n\n"
                 f"An unexpected error occurred during validation:\n{str(e)}\n\n"
-                f"Please check the console for details and try again."
+                f"Please check the QGIS log for details and try again."
             )
             return False
 
     def show_info_message(self, message):
         """Show friendly info message to user."""
-        try:
-            self.iface.messageBar().pushMessage(
-                "QOLS Info", 
-                message, 
-                level=MSG_INFO,
-                duration=3
-            )
-        except Exception as e:
-            print(f"QOLS: Error showing info message: {e}")
+        self.iface.messageBar().pushMessage("QOLS Info", message, level=MSG_INFO, duration=3)
 
     def show_error_message(self, message):
         """Show friendly error message to user."""
-        try:
-            self.iface.messageBar().pushMessage(
-                "QOLS Error", 
-                message, 
-                level=MSG_CRITICAL,
-                duration=5
-            )
-        except Exception as e:
-            print(f"QOLS: Error showing error message: {e}")
+        self.iface.messageBar().pushMessage("QOLS Error", message, level=MSG_CRITICAL, duration=5)
 
+    @pyqtSlot()
     def on_close_clicked(self):
         """Handle close button click."""
         try:
-            print("QOLS: Close button clicked")
             self.closeClicked.emit()
         except Exception as e:
-            print(f"QOLS: Error in close clicked: {e}")
+            logger.warning(f"Unhandled error: {e}")
 
     def get_parameters(self):
         """Collect and return all UI parameters for the currently active surface tab.
@@ -1719,50 +1524,15 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         start point.
         """
         try:
-            # CRITICAL VALIDATION: Re-verify layers before creating parameters
             runway_layer = self.runwayLayerCombo.currentLayer()
             threshold_layer = self.thresholdLayerCombo.currentLayer()
-            
-            # SAFETY CHECK: Ensure layers are still valid (could have been removed)
-            if not runway_layer:
-                raise Exception("CRITICAL ERROR: No Runway Layer Centerline selected. This should not happen after validation.")
-            
-            if not threshold_layer:
-                raise Exception("CRITICAL ERROR: No threshold layer selected. This should not happen after validation.")
-            
-            # SAFETY CHECK: Ensure layers are still in project (could have been removed)
-            project_layers = QgsProject.instance().mapLayers().values()
-            if runway_layer not in project_layers:
-                raise Exception(f"CRITICAL ERROR: Runway Layer Centerline '{runway_layer.name()}' no longer exists in project.")
-            
-            if threshold_layer not in project_layers:
-                raise Exception(f"CRITICAL ERROR: Threshold layer '{threshold_layer.name()}' no longer exists in project.")
-            
-            # SAFETY CHECK: Re-verify geometry types (layers could have changed)
-            if runway_layer.geometryType() != QgsWkbTypes.LineGeometry:
-                raise Exception(f"CRITICAL ERROR: Runway Layer Centerline '{runway_layer.name()}' geometry changed to {self.get_layer_geometry_info(runway_layer)}.")
-            
-            if threshold_layer.geometryType() != QgsWkbTypes.PointGeometry:
-                raise Exception(f"CRITICAL ERROR: Threshold layer '{threshold_layer.name()}' geometry changed to {self.get_layer_geometry_info(threshold_layer)}.")
-            
-            # Get separate selection settings for each layer
+
             use_runway_selected = self.useSelectedRunwayCheckBox.isChecked()
             use_threshold_selected = self.useSelectedThresholdCheckBox.isChecked()
-            
-            # SAFETY CHECK: Re-verify feature selections if required
-            if use_runway_selected:
-                runway_selected = len(runway_layer.selectedFeatures())
-                if runway_selected == 0:
-                    raise Exception(f"CRITICAL ERROR: No runway features selected but 'Use Selected Runway Features' is checked.")
-            
-            if use_threshold_selected:
-                threshold_selected = len(threshold_layer.selectedFeatures())
-                if threshold_selected == 0:
-                    raise Exception(f"CRITICAL ERROR: No threshold features selected but 'Use Selected Threshold Features' is checked.")
-            
+
             # Get direction
             direction = 0 if self.direction_start_to_end else -1
-            
+
             # Get current tab to determine surface type
             current_tab = self.scriptTabWidget.currentWidget()
             current_tab_index = self.scriptTabWidget.currentIndex()
@@ -1774,11 +1544,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             except ValueError:
                 raise Exception(f"Unknown surface type tab: {_tab_text!r}")
 
-            print(f"QOLS DEBUG: current_tab_index = {current_tab_index}")
-            print(f"QOLS DEBUG: surface_type = '{surface_type}'")
-            print(f"QOLS DEBUG: surface_type type = {type(surface_type)}")
-            print(f"QOLS DEBUG: surface_type repr = {repr(surface_type)}")
-            
+
             # Get parameters based on current tab
             if surface_type == SurfaceType.APPROACH:
                 # Determine direction and map elevations accordingly
@@ -1826,11 +1592,11 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     'second_section_length_m': l2_value,
                     'horizontal_section_length_m': lh_value,
                     'direction': s_value,
-                    # Additional derived defaults (if available from apply_approach_defaults_from_selection)
-                    'divergence_ratio': getattr(self, '_approach_divergence_ratio', 0.15),
-                    'first_section_slope': getattr(self, '_approach_slope1', 0.02),
-                    'second_section_slope': getattr(self, '_approach_slope2', 0.025),
-                    'threshold_offset_m': getattr(self, '_approach_threshold_offset', 60.0),
+                    # Derived approach defaults from last apply_approach_defaults_from_selection call
+                    'divergence_ratio': self._approach_state.divergence_ratio,
+                    'first_section_slope': self._approach_state.slope1,
+                    'second_section_slope': self._approach_state.slope2,
+                    'threshold_offset_m': self._approach_state.threshold_offset_m,
                     'contour_interval_m': int(round(self.get_numeric_value('spin_contour_interval')))
                 }
             elif surface_type == SurfaceType.CONICAL:
@@ -1848,44 +1614,31 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     'rwyClassification': self.combo_rwyClassification_inner_conical.currentText()
                 }
             elif surface_type == SurfaceType.INNER_CONICAL:
-                # Para el tab combinado, preparamos parámetros para ambas superficies
                 inner_params = {
-                    'radius': self.get_numeric_value('spin_L_inner'),          # Inner Horizontal radius
-                    'height': self.get_numeric_value('spin_height_inner'),     # Inner Horizontal height
+                    'radius': self.get_numeric_value('spin_L_inner'),
+                    'height': self.get_numeric_value('spin_height_inner'),
                     'code': self.get_code_value('spin_code_inner_conical'),
-                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText()
+                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText(),
                 }
                 conical_params = {
-                    'radius': self.get_numeric_value('spin_L_conical'),        # Conical radius (calculated from inner)
-                    'height': self.get_numeric_value('spin_height_conical'),   # Conical height
-                    'slope': self.get_numeric_value('spin_conical_slope'),  # Conical slope %
+                    'radius': self.get_numeric_value('spin_L_conical'),
+                    'height': self.get_numeric_value('spin_height_conical'),
+                    'slope': self.get_numeric_value('spin_conical_slope'),
                     'code': self.get_code_value('spin_code_inner_conical'),
-                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText()
+                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText(),
                 }
-                # Empaquetar ambos conjuntos de parámetros
                 specific_params = {
                     'inner_horizontal': inner_params,
                     'conical': conical_params,
-                    'combined_execution': True  # Flag para identificar ejecución combinada
+                    'combined_execution': True,
                 }
             elif surface_type == SurfaceType.OUTER_HORIZONTAL:
                 specific_params = {
-                    'code': self.get_code_value('spin_code_outer'),  # QComboBox
-                    'radius': float(self.spin_radius_outer.text() or "0"),  # QLineEdit
-                    'height': float(self.spin_height_outer.text() or "0")   # QLineEdit
+                    'code': self.get_code_value('spin_code_outer'),
+                    'radius': self.get_numeric_value('spin_radius_outer'),
+                    'height': self.get_numeric_value('spin_height_outer'),
                 }
             elif surface_type == SurfaceType.TAKEOFF:
-                print(f"QOLS DEBUG: Collecting Take-off Surface parameters...")
-                print(f"QOLS DEBUG: spin_code_takeoff.currentText() = {self.spin_code_takeoff.currentText()}")
-                # Take-Off RWY Classification removed from UI; no debug for it
-                print(f"QOLS DEBUG: spin_widthDep_takeoff.text() = {self.spin_widthDep_takeoff.text()}")
-                print(f"QOLS DEBUG: spin_maxWidthDep_takeoff.text() = {self.spin_maxWidthDep_takeoff.text()}")
-                print(f"QOLS DEBUG: spin_divergence_takeoff.text() = {self.spin_divergence_takeoff.text()}")
-                print(f"QOLS DEBUG: spin_startDistance_takeoff.text() = {self.spin_startDistance_takeoff.text()}")
-                print(f"QOLS DEBUG: spin_surfaceLength_takeoff.text() = {self.spin_surfaceLength_takeoff.text()}")
-                print(f"QOLS DEBUG: spin_slope_takeoff.text() = {self.spin_slope_takeoff.text()}")
-                # IMC checkbox eliminado; no aplica log
-                
                 code_value = self.get_code_value('spin_code_takeoff')
                 # Determine default maxWidthDep per code (editable), honoring checkbox for Code 3/4
                 if code_value in [3, 4]:
@@ -1917,14 +1670,12 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     'direction': s_value,
                     'contour_interval_m': int(round(self.get_numeric_value('spin_contour_interval_takeoff')))
                 }
-                print(f"QOLS DEBUG: Take-off Surface specific_params = {specific_params}")
             elif surface_type == SurfaceType.TRANSITIONAL:
                 # Note: Using correct transitional surface widget names
                 # IMPORTANT: For transitional, use the specific rotation button instead of general direction
                 s_value = 0 if self.transitional_direction_normal else -1  # s = 0 for normal, s = -1 for rotated
-                
-                print(f"QOLS DEBUG: Transitional rotation button normal={self.transitional_direction_normal}, s={s_value}")
-                
+
+
                 specific_params = {
                     'code': self.get_code_value('spin_code_transitional'),  # QComboBox
                     'rwyClassification': self.combo_rwyClassification_transitional.currentText(),
@@ -1935,7 +1686,6 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     'Tslope': float(self.spin_Tslope_transitional.text() or "0") / 100.0,   # QLineEdit, convert % to decimal
                     's': s_value  # Special parameter for transitional runway direction
                 }
-                print(f"QOLS DEBUG: Transitional Surface specific_params = {specific_params}")
             elif surface_type == SurfaceType.OFZ:
                 specific_params = {
                     'code': self.get_code_value('spin_code_ofz'),  # QComboBox
@@ -1961,10 +1711,10 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                         specific_params['BL_divergence'] = bl.get('divergence_ratio')
                         specific_params['BL_slope'] = bl.get('slope_ratio')
                 except Exception as e:
-                    print(f"QOLS: Warning injecting IA/BL params for OFZ: {e}")
+                    logger.warning(f"Unhandled error: {e}")
             else:
                 specific_params = {}
-            
+
             # Combine all parameters
             params = {
                 'surface_type': surface_type,
@@ -1975,19 +1725,15 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 'direction': direction,
                 'specific_params': specific_params
             }
-            
-            print(f"QOLS: Parameters collected for {surface_type}: {params}")
+
             return params
 
         except Exception as e:
-            print(f"QOLS: Error getting parameters: {e}")
             self.show_error_message(f"Error collecting parameters: {str(e)}")
             return None
 
     def showEvent(self, event):
-        """Reformat numeric QLineEdit fields each time the panel becomes visible."""
         super().showEvent(event)
-        QTimer.singleShot(50, self.force_clean_display)
 
     def _connect(self, signal, slot):
         """Connect signal to slot and register the pair for teardown in closeEvent."""
@@ -1997,8 +1743,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
     def closeEvent(self, event):
         """Handle close event with proper cleanup."""
         try:
-            print("QOLS: Widget close event")
-            
+
             # Disconnect tracked signals to prevent memory leaks
             for sig, slot in list(self._connections):
                 try:
@@ -2007,9 +1752,8 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     pass
             self._connections.clear()
             self.disconnect_layer_selection_signals()
-            
+
             self.closingPlugin.emit()
             event.accept()
         except Exception as e:
-            print(f"QOLS: Error in close event: {e}")
             event.accept()

@@ -11,14 +11,7 @@ from qgis.PyQt.QtCore import *
 from qgis.PyQt.QtGui import *
 from qgis.gui import *
 from qgis.utils import iface
-from math import *
-import traceback
-
-# Qgis message-level compat (QGIS 3/Qt5: Qgis.Info  QGIS 4/Qt6: Qgis.MessageLevel.Info)
-try:
-    _ML = Qgis.MessageLevel
-except AttributeError:
-    _ML = Qgis  # QGIS 3: level constants sit directly on Qgis
+from math import sqrt, degrees
 import traceback
 
 def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
@@ -42,7 +35,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
             return total
         longest = max(parts, key=length_of)
         if iface and len(parts) > 1:
-            iface.messageBar().pushMessage("TakeOffSurface Info", "MultiLineString detected; using longest part as centerline.", level=_ML.Info)
+            iface.messageBar().pushMessage("TakeOffSurface Info", "MultiLineString detected; using longest part as centerline.", level=MSG_INFO)
         return [QgsPoint(p) for p in longest]
     poly = geometry.asPolyline()
     if poly and len(poly) >= 2:
@@ -165,7 +158,7 @@ try:
     
 except Exception as e:
     print(f"TakeOffSurface: Error with Runway Layer Centerline: {e}")
-    iface.messageBar().pushMessage("TakeOffSurface Error", f"Runway Layer Centerline error: {str(e)}", level=_ML.Critical)
+    iface.messageBar().pushMessage("TakeOffSurface Error", f"Runway Layer Centerline error: {str(e)}", level=MSG_CRITICAL)
     raise
 
 # ORIGINAL ZIHs calculation (kept for compatibility; not used in geometry below)
@@ -240,7 +233,7 @@ try:
 
 except Exception as e:
     print(f"TakeOffSurface: Error with threshold layer: {e}")
-    iface.messageBar().pushMessage("TakeOffSurface Error", f"Threshold layer error: {str(e)}", level=_ML.Critical)
+    iface.messageBar().pushMessage("TakeOffSurface Error", f"Threshold layer error: {str(e)}", level=MSG_CRITICAL)
     raise
 
 # Get x,y from threshold - EXACTLY as original
@@ -327,7 +320,7 @@ print(sc)
 canvas.zoomScale(sc)
 
 print("TakeOffSurface: Surface creation completed successfully")
-iface.messageBar().pushMessage("QPANSOPY:", "TakeOff Climb Surface Calculation Finished", level=_ML.Success)
+iface.messageBar().pushMessage("QPANSOPY:", "TakeOff Climb Surface Calculation Finished", level=MSG_SUCCESS)
 
 # -----------------------------------------------------------------------
 # Contour layer (CT-17 – CT-21)

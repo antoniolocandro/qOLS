@@ -9,13 +9,7 @@ from qgis.core import *
 from qgis.PyQt.QtCore import *
 from qgis.PyQt.QtGui import *
 from qgis.gui import *
-from math import *
-
-# Qgis message-level compat (QGIS 3/Qt5: Qgis.Info  QGIS 4/Qt6: Qgis.MessageLevel.Info)
-try:
-    _ML = Qgis.MessageLevel
-except AttributeError:
-    _ML = Qgis  # QGIS 3: level constants sit directly on Qgis
+from math import sqrt
 
 def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
     """Return a list of QgsPoint representing a single polyline.
@@ -38,7 +32,7 @@ def _normalize_polyline_points(geometry: 'QgsGeometry', iface=None):
             return total
         longest = max(parts, key=length_of)
         if iface and len(parts) > 1:
-            iface.messageBar().pushMessage("Transitional Info", "MultiLineString detected; using longest part as centerline.", level=_ML.Info)
+            iface.messageBar().pushMessage("Transitional Info", "MultiLineString detected; using longest part as centerline.", level=MSG_INFO)
         return [QgsPoint(p) for p in longest]
     poly = geometry.asPolyline()
     if poly and len(poly) >= 2:
@@ -131,7 +125,7 @@ try:
 
 except Exception as e:
     print(f"TransitionalSurface: Error with Runway Layer Centerline: {e}")
-    iface.messageBar().pushMessage("TransitionalSurface Error", f"Runway Layer Centerline error: {str(e)}", level=_ML.Critical)
+    iface.messageBar().pushMessage("TransitionalSurface Error", f"Runway Layer Centerline error: {str(e)}", level=MSG_CRITICAL)
     raise
 
 # Calculate ZIHs
@@ -180,7 +174,7 @@ try:
 
 except Exception as e:
     print(f"TransitionalSurface: Error with threshold layer: {e}")
-    iface.messageBar().pushMessage("TransitionalSurface Error", f"Threshold layer error: {str(e)}", level=_ML.Critical)
+    iface.messageBar().pushMessage("TransitionalSurface Error", f"Threshold layer error: {str(e)}", level=MSG_CRITICAL)
     raise
 
 # Get x,y from threshold - ENHANCED LOGIC FOR AUTO-DIRECTION
@@ -343,7 +337,7 @@ print (sc)
 canvas.zoomScale(sc)
 
 
-iface.messageBar().pushMessage("QPANSOPY:", "Transitional Surface Calculation Finished", level=_ML.Success)
+iface.messageBar().pushMessage("QPANSOPY:", "Transitional Surface Calculation Finished", level=MSG_SUCCESS)
 
 
 set(globals().keys()).difference(myglobals)
