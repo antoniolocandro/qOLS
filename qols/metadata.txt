@@ -1,21 +1,21 @@
 [general]
-name=QOLS
+name=qOLS
 qgisMinimumVersion=3.0
 qgisMaximumVersion=4.99
 description=Obstacle Limitation Surfaces plugin for QGIS
 version=0.1.0
-author=Your Name
-email=your.email@example.com
+author=FLYGHT7
+email=info@flyght7.com
 
 about=This plugin allows calculation and visualization of various OLS (Obstacle Limitation Surfaces) for aerodrome analysis. Features include navigation between different surface types, parameter customization, and export options.
 
-tracker=http://bugs
-repository=http://repo
+tracker=https://github.com/FLYGHT7/qOLS/issues
+repository=https://github.com/FLYGHT7/qOLS
 
 hasProcessingProvider=no
 tags=python,aviation,OLS,runway,obstacle,ICAO
 
-homepage=http://homepage
+homepage=https://www.flyght7.com/
 category=Vector
 icon=icon.png
 experimental=True
