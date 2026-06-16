@@ -8,6 +8,7 @@ Note: Plugin integration uses 'threshold_layer' parameter name for compatibility
 with existing UI, but this script uses ARP (Aerodrome Reference Point) terminology
 for clarity and DOC 9137 compliance.
 '''
+# flake8: noqa  # exec()-dispatched script; star imports intentional (see TD-03)
 
 from qgis.core import *
 from qgis.PyQt.QtCore import *

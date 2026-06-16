@@ -79,7 +79,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             # Wire Approach classification/code changes to apply defaults
             try:
                 if hasattr(self, 'combo_rwyClassification'):
-                    self.combo_rwyClassification.currentIndexChanged.connect(self.apply_approach_defaults_from_selection)
+                    self.combo_rwyClassification.currentIndexChanged.connect(self.apply_approach_defaults_from_selection)  # noqa: E501
                 if hasattr(self, 'spin_code'):
                     self.spin_code.currentIndexChanged.connect(self.apply_approach_defaults_from_selection)
             except Exception as e:
@@ -89,7 +89,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             try:
                 if hasattr(self, 'combo_rwyClassification_ofz'):
                     self.combo_rwyClassification_ofz.currentIndexChanged.connect(self.update_ofz_visibility)
-                    self.combo_rwyClassification_ofz.currentIndexChanged.connect(self.apply_ofz_defaults_from_selection)
+                    self.combo_rwyClassification_ofz.currentIndexChanged.connect(self.apply_ofz_defaults_from_selection)  # noqa: E501
                 if hasattr(self, 'spin_code_ofz'):
                     self.spin_code_ofz.currentIndexChanged.connect(self.apply_ofz_defaults_from_selection)
             except Exception as e:
@@ -123,9 +123,9 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             # Wire Transitional classification/code changes to apply defaults
             try:
                 if hasattr(self, 'combo_rwyClassification_transitional'):
-                    self.combo_rwyClassification_transitional.currentIndexChanged.connect(self.apply_transitional_defaults_from_selection)
+                    self.combo_rwyClassification_transitional.currentIndexChanged.connect(self.apply_transitional_defaults_from_selection)  # noqa: E501
                 if hasattr(self, 'spin_code_transitional'):
-                    self.spin_code_transitional.currentIndexChanged.connect(self.apply_transitional_defaults_from_selection)
+                    self.spin_code_transitional.currentIndexChanged.connect(self.apply_transitional_defaults_from_selection)  # noqa: E501
             except Exception as e:
                 print(f"QOLS: Could not connect Transitional defaults handlers: {e}")
 
@@ -187,7 +187,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             try:
                 self.update_active_rule_set_label()
             except Exception as e:
-                print(f"QOLS: Could not update active rule set label: {e}")  # nosec B608 - false positive, no SQL involved
+                print(f"QOLS: Could not update active rule set label: {e}")  # nosec B608 - false positive, no SQL involved  # noqa: E501
 
         except Exception as e:
             print(f"QOLS: Error initializing QolsDockWidget: {e}")
@@ -281,7 +281,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             except Exception:
                 pass
         except Exception as e:
-            print(f"QOLS: Warning - smart formatting setup failed for {getattr(lineedit, 'objectName', lambda: '')()}: {e}")
+            print(f"QOLS: Warning - smart formatting setup failed for {getattr(lineedit, 'objectName', lambda: '')()}: {e}")  # noqa: E501
 
     def initialize_takeoff_defaults(self):
         """Initialize default values for Take-Off and other surfaces."""
@@ -356,7 +356,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 'spin_radius_outer': 15000.0,
                 'spin_height_outer': 150.0
             }
-            all_defaults = {**approach_defaults, **conical_defaults, **inner_defaults, **ofz_defaults, **outer_defaults}
+            all_defaults = {**approach_defaults, **conical_defaults, **inner_defaults, **ofz_defaults, **outer_defaults}  # noqa: E501
             for widget_name, default_value in all_defaults.items():
                 self.set_numeric_value(widget_name, default_value)
                 print(f"QOLS: Set {widget_name} = {default_value}")
@@ -392,9 +392,9 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         """Connect change signals to apply defaults when RWY/Code change in combined tab."""
         try:
             if hasattr(self, 'combo_rwyClassification_inner_conical'):
-                self.combo_rwyClassification_inner_conical.currentIndexChanged.connect(self.apply_combined_inner_conical_defaults_from_selection)
+                self.combo_rwyClassification_inner_conical.currentIndexChanged.connect(self.apply_combined_inner_conical_defaults_from_selection)  # noqa: E501
             if hasattr(self, 'spin_code_inner_conical'):
-                self.spin_code_inner_conical.currentIndexChanged.connect(self.apply_combined_inner_conical_defaults_from_selection)
+                self.spin_code_inner_conical.currentIndexChanged.connect(self.apply_combined_inner_conical_defaults_from_selection)  # noqa: E501
         except Exception as e:
             print(f"QOLS: Error wiring defaults for combined Inner/Conical: {e}")
 
@@ -405,7 +405,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         Uses :meth:`_get_merged_defaults` (R-01) to keep the rule/ICAO merge logic DRY.
         """
         try:
-            rwy = self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'
+            rwy = self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'  # noqa: E501
             code = self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4
 
             # --- Inner Horizontal defaults (R-01) ---
@@ -416,7 +416,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             )
             self.set_numeric_value('spin_L_inner', inner_defaults.get('radius_m', 4000.0))
             self.set_numeric_value('spin_height_inner', inner_defaults.get('height_m', 45.0))
-            print(f"QOLS: Inner Horizontal defaults applied: {rwy}, Code {code} -> Radius={inner_defaults.get('radius_m')}, Height={inner_defaults.get('height_m')}")
+            print(f"QOLS: Inner Horizontal defaults applied: {rwy}, Code {code} -> Radius={inner_defaults.get('radius_m')}, Height={inner_defaults.get('height_m')}")  # noqa: E501
 
             # --- Conical defaults (R-01) ---
             # con_rule kept separately so we can distinguish rule-supplied radius_m from ICAO fallback.
@@ -444,7 +444,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 skip_recalc = False
 
             _slope_w = getattr(self, 'spin_conical_slope', None)
-            print(f"QOLS: Conical defaults applied: {rwy}, Code {code} -> Height={conical_defaults.get('height_m')}, Slope={_slope_w.text() if _slope_w is not None else 'N/A'}%")
+            print(f"QOLS: Conical defaults applied: {rwy}, Code {code} -> Height={conical_defaults.get('height_m')}, Slope={_slope_w.text() if _slope_w is not None else 'N/A'}%")  # noqa: E501
 
             # Recalculate conical radius from height/slope+inner unless the rule provided one
             if not skip_recalc:
@@ -551,7 +551,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 return
             computed_radius = height / slope + inner_radius
             self.set_numeric_value('spin_L_conical', computed_radius)
-            print(f"QOLS: Recalculated conical radius = {computed_radius} (height={height}, slope%={slope_pct}, inner={inner_radius})")
+            print(f"QOLS: Recalculated conical radius = {computed_radius} (height={height}, slope%={slope_pct}, inner={inner_radius})")  # noqa: E501
         except Exception as e:
             print(f"QOLS: Error recalculating conical radius: {e}")
 
@@ -584,7 +584,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     d['second_section_slope'] = rd['slope2_ratio']
                 if 'LH_m' in rd:
                     d['LH_m'] = rd['LH_m']
-            # Only override if user hasn't changed (or always override? adopting always override when classification/code changed)
+            # Only override if user hasn't changed (or always override? adopting always override when classification/code changed)  # noqa: E501
             self.set_numeric_value('spin_widthApp', d['width_m'])
             self.set_numeric_value('spin_L1', d['L1_m'])
             self.set_numeric_value('spin_L2', d['L2_m'])
@@ -595,7 +595,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             self._approach_divergence_ratio = d['divergence_ratio']
             self._approach_slope1 = d['first_section_slope']
             self._approach_slope2 = d['second_section_slope']
-            print(f"QOLS: Approach defaults applied: {rwy} Code {code} -> width={d['width_m']} L1={d['L1_m']} L2={d['L2_m']} LH={d['LH_m']} div={d['divergence_ratio']} thrOff={d['threshold_offset_m']}")
+            print(f"QOLS: Approach defaults applied: {rwy} Code {code} -> width={d['width_m']} L1={d['L1_m']} L2={d['L2_m']} LH={d['LH_m']} div={d['divergence_ratio']} thrOff={d['threshold_offset_m']}")  # noqa: E501
         except Exception as e:
             print(f"QOLS: Error applying approach defaults: {e}")
 
@@ -846,7 +846,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         try:
             # Get all vector layers
             vector_layers = [layer for layer in QgsProject.instance().mapLayers().values()
-                           if isinstance(layer, QgsVectorLayer)]
+                           if isinstance(layer, QgsVectorLayer)]  # noqa: E128
 
             # Filter Runway Layer Centerline layers - only show LINE geometry
             runway_excluded = []
@@ -863,7 +863,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             self.runwayLayerCombo.setExceptedLayerList(runway_excluded)
             self.thresholdLayerCombo.setExceptedLayerList(threshold_excluded)
 
-            print(f"QOLS: Applied geometry filters - Runway excluded: {len(runway_excluded)}, Threshold excluded: {len(threshold_excluded)}")
+            print(f"QOLS: Applied geometry filters - Runway excluded: {len(runway_excluded)}, Threshold excluded: {len(threshold_excluded)}")  # noqa: E501
 
         except Exception as e:
             print(f"QOLS: Error applying geometry filters: {e}")
@@ -879,7 +879,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 color: black !important;
                 background-color: #0078d4 !important;
             }
-            
+
             QgsMapLayerComboBox QAbstractItemView::item:selected {
                 color: black !important;
             }
@@ -928,7 +928,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
 
             # Only proceed if layer counts have changed
             if (current_runway_count == self._last_runway_count and
-                current_threshold_count == self._last_threshold_count):
+                current_threshold_count == self._last_threshold_count):  # noqa: E129
                 return  # No changes, skip update
 
             print(f"QOLS: Updating tooltips - Runway: {current_runway_count}, Threshold: {current_threshold_count}")
@@ -1018,7 +1018,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                         index = obj.indexAt(event.pos())
                         if index.isValid():
                             # Get the layer for this index
-                            combo = self.runwayLayerCombo if obj == self.runwayLayerCombo.view() else self.thresholdLayerCombo
+                            combo = self.runwayLayerCombo if obj == self.runwayLayerCombo.view() else self.thresholdLayerCombo  # noqa: E501
                             layer = combo.layer(index.row())
                             if layer:
                                 geom_type = self.get_geometry_type_name(layer)
@@ -1061,12 +1061,12 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     font-size: 9pt;
                     background-color: white;
                 }
-                
+
                 QgsMapLayerComboBox:hover {
                     border-color: #3498db;
                     background-color: #f8f9fa;
                 }
-                
+
                 /* Tooltip styling for visibility */
                 QToolTip {
                     background-color: #ffffcc;
@@ -1076,12 +1076,12 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     border-radius: 3px;
                     font-size: 10pt;
                 }
-                
+
                 /* Solo indicadores de color para diferenciación */
                 QgsMapLayerComboBox#runwayLayerCombo {
                     border-left: 3px solid #3498db;
                 }
-                
+
                 QgsMapLayerComboBox#thresholdLayerCombo {
                     border-left: 3px solid #e67e22;
                 }
@@ -1216,9 +1216,9 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             # Update max width por defecto del código (editable)
             if hasattr(self, 'spin_maxWidthDep_takeoff') and self.spin_maxWidthDep_takeoff:
                 # If Code 3/4, respect the checkbox setting; otherwise use table value
-                if code_value in [3, 4] and hasattr(self, 'check_finalWidth1800_takeoff') and self.check_finalWidth1800_takeoff.isChecked():
+                if code_value in [3, 4] and hasattr(self, 'check_finalWidth1800_takeoff') and self.check_finalWidth1800_takeoff.isChecked():  # noqa: E501
                     self.spin_maxWidthDep_takeoff.setText("1800.0")
-                elif code_value in [3, 4] and hasattr(self, 'check_finalWidth1800_takeoff') and not self.check_finalWidth1800_takeoff.isChecked():
+                elif code_value in [3, 4] and hasattr(self, 'check_finalWidth1800_takeoff') and not self.check_finalWidth1800_takeoff.isChecked():  # noqa: E501
                     self.spin_maxWidthDep_takeoff.setText("1200.0")
                 else:
                     self.spin_maxWidthDep_takeoff.setText(f"{t['final_width']:.1f}")
@@ -1317,7 +1317,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         """Get summary of available layers for debugging."""
         try:
             vector_layers = [layer for layer in QgsProject.instance().mapLayers().values()
-                           if isinstance(layer, QgsVectorLayer)]
+                           if isinstance(layer, QgsVectorLayer)]  # noqa: E128
 
             summary = []
             summary.append("=== LAYER SUMMARY ===")
@@ -1328,7 +1328,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             other_layers = []
 
             for layer in vector_layers:
-                layer_info = f"'{layer.name()}' ({self.get_layer_geometry_info(layer)}, {layer.featureCount()} features)"
+                layer_info = f"'{layer.name()}' ({self.get_layer_geometry_info(layer)}, {layer.featureCount()} features)"  # noqa: E501
 
                 if layer.geometryType() == QgsWkbTypes.LineGeometry:
                     line_layers.append(layer_info)
@@ -1634,7 +1634,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             print("QOLS: ✅ ALL VALIDATIONS PASSED")
             print(f"QOLS: Runway Layer Centerline: '{runway_layer.name()}' (LINE geometry, {runway_total} features)")
             print(f"QOLS: Threshold Layer: '{threshold_layer.name()}' (POINT geometry, {threshold_total} features)")
-            print(f"QOLS: Selection Mode: Runway={'selected' if use_runway_selected else 'all'}, Threshold={'selected' if use_threshold_selected else 'all'}")
+            print(f"QOLS: Selection Mode: Runway={'selected' if use_runway_selected else 'all'}, Threshold={'selected' if use_threshold_selected else 'all'}")  # noqa: E501
 
             return True
 
@@ -1689,25 +1689,25 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
 
             # SAFETY CHECK: Ensure layers are still valid (could have been removed)
             if not runway_layer:
-                raise Exception("CRITICAL ERROR: No Runway Layer Centerline selected. This should not happen after validation.")
+                raise Exception("CRITICAL ERROR: No Runway Layer Centerline selected. This should not happen after validation.")  # noqa: E501
 
             if not threshold_layer:
-                raise Exception("CRITICAL ERROR: No threshold layer selected. This should not happen after validation.")
+                raise Exception("CRITICAL ERROR: No threshold layer selected. This should not happen after validation.")  # noqa: E501
 
             # SAFETY CHECK: Ensure layers are still in project (could have been removed)
             project_layers = QgsProject.instance().mapLayers().values()
             if runway_layer not in project_layers:
-                raise Exception(f"CRITICAL ERROR: Runway Layer Centerline '{runway_layer.name()}' no longer exists in project.")
+                raise Exception(f"CRITICAL ERROR: Runway Layer Centerline '{runway_layer.name()}' no longer exists in project.")  # noqa: E501
 
             if threshold_layer not in project_layers:
-                raise Exception(f"CRITICAL ERROR: Threshold layer '{threshold_layer.name()}' no longer exists in project.")
+                raise Exception(f"CRITICAL ERROR: Threshold layer '{threshold_layer.name()}' no longer exists in project.")  # noqa: E501
 
             # SAFETY CHECK: Re-verify geometry types (layers could have changed)
             if runway_layer.geometryType() != QgsWkbTypes.LineGeometry:
-                raise Exception(f"CRITICAL ERROR: Runway Layer Centerline '{runway_layer.name()}' geometry changed to {self.get_layer_geometry_info(runway_layer)}.")
+                raise Exception(f"CRITICAL ERROR: Runway Layer Centerline '{runway_layer.name()}' geometry changed to {self.get_layer_geometry_info(runway_layer)}.")  # noqa: E501
 
             if threshold_layer.geometryType() != QgsWkbTypes.PointGeometry:
-                raise Exception(f"CRITICAL ERROR: Threshold layer '{threshold_layer.name()}' geometry changed to {self.get_layer_geometry_info(threshold_layer)}.")
+                raise Exception(f"CRITICAL ERROR: Threshold layer '{threshold_layer.name()}' geometry changed to {self.get_layer_geometry_info(threshold_layer)}.")  # noqa: E501
 
             # Get separate selection settings for each layer
             use_runway_selected = self.useSelectedRunwayCheckBox.isChecked()
@@ -1717,12 +1717,12 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             if use_runway_selected:
                 runway_selected = len(runway_layer.selectedFeatures())
                 if runway_selected == 0:
-                    raise Exception("CRITICAL ERROR: No runway features selected but 'Use Selected Runway Features' is checked.")
+                    raise Exception("CRITICAL ERROR: No runway features selected but 'Use Selected Runway Features' is checked.")  # noqa: E501
 
             if use_threshold_selected:
                 threshold_selected = len(threshold_layer.selectedFeatures())
                 if threshold_selected == 0:
-                    raise Exception("CRITICAL ERROR: No threshold features selected but 'Use Selected Threshold Features' is checked.")
+                    raise Exception("CRITICAL ERROR: No threshold features selected but 'Use Selected Threshold Features' is checked.")  # noqa: E501
 
             # Get direction
             direction = 0 if self.direction_start_to_end else -1
@@ -1799,30 +1799,30 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 specific_params = {
                     'radius': self.get_numeric_value('spin_L_conical'),        # Distance L is the radius
                     'height': self.get_numeric_value('spin_height_conical'),   # Height for 3D polygon
-                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,
-                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'
+                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,  # noqa: E501
+                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'  # noqa: E501
                 }
             elif surface_type == SurfaceType.INNER_HORIZONTAL:
                 specific_params = {
                     'radius': self.get_numeric_value('spin_L_inner'),          # Distance L is the radius
                     'height': self.get_numeric_value('spin_height_inner'),     # Height for 3D polygon
-                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,
-                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'
+                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,  # noqa: E501
+                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'  # noqa: E501
                 }
             elif surface_type == SurfaceType.INNER_CONICAL:
                 # Para el tab combinado, preparamos parámetros para ambas superficies
                 inner_params = {
                     'radius': self.get_numeric_value('spin_L_inner'),          # Inner Horizontal radius
                     'height': self.get_numeric_value('spin_height_inner'),     # Inner Horizontal height
-                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,
-                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'
+                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,  # noqa: E501
+                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'  # noqa: E501
                 }
                 conical_params = {
                     'radius': self.get_numeric_value('spin_L_conical'),        # Conical radius (calculated from inner)
                     'height': self.get_numeric_value('spin_height_conical'),   # Conical height
-                    'slope': self.get_numeric_value('spin_conical_slope') if hasattr(self, 'spin_conical_slope') else 5.0,  # Conical slope %
-                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,
-                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'
+                    'slope': self.get_numeric_value('spin_conical_slope') if hasattr(self, 'spin_conical_slope') else 5.0,  # Conical slope %  # noqa: E501
+                    'code': self.get_code_value('spin_code_inner_conical') if hasattr(self, 'spin_code_inner_conical') else 4,  # noqa: E501
+                    'rwyClassification': self.combo_rwyClassification_inner_conical.currentText() if hasattr(self, 'combo_rwyClassification_inner_conical') else 'Precision Approach CAT I'  # noqa: E501
                 }
                 # Empaquetar ambos conjuntos de parámetros
                 specific_params = {
@@ -1842,10 +1842,10 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 # Take-Off RWY Classification removed from UI; no debug for it
                 print(f"QOLS DEBUG: spin_widthDep_takeoff.text() = {self.spin_widthDep_takeoff.text()}")
                 print(f"QOLS DEBUG: spin_maxWidthDep_takeoff.text() = {self.spin_maxWidthDep_takeoff.text()}")
-                print(f"QOLS DEBUG: spin_divergence_takeoff.text() = {getattr(self, 'spin_divergence_takeoff', None).text() if hasattr(self, 'spin_divergence_takeoff') else 'N/A'}")
-                print(f"QOLS DEBUG: spin_startDistance_takeoff.text() = {getattr(self, 'spin_startDistance_takeoff', None).text() if hasattr(self, 'spin_startDistance_takeoff') else 'N/A'}")
-                print(f"QOLS DEBUG: spin_surfaceLength_takeoff.text() = {getattr(self, 'spin_surfaceLength_takeoff', None).text() if hasattr(self, 'spin_surfaceLength_takeoff') else 'N/A'}")
-                print(f"QOLS DEBUG: spin_slope_takeoff.text() = {getattr(self, 'spin_slope_takeoff', None).text() if hasattr(self, 'spin_slope_takeoff') else 'N/A'}")
+                print(f"QOLS DEBUG: spin_divergence_takeoff.text() = {getattr(self, 'spin_divergence_takeoff', None).text() if hasattr(self, 'spin_divergence_takeoff') else 'N/A'}")  # noqa: E501
+                print(f"QOLS DEBUG: spin_startDistance_takeoff.text() = {getattr(self, 'spin_startDistance_takeoff', None).text() if hasattr(self, 'spin_startDistance_takeoff') else 'N/A'}")  # noqa: E501
+                print(f"QOLS DEBUG: spin_surfaceLength_takeoff.text() = {getattr(self, 'spin_surfaceLength_takeoff', None).text() if hasattr(self, 'spin_surfaceLength_takeoff') else 'N/A'}")  # noqa: E501
+                print(f"QOLS DEBUG: spin_slope_takeoff.text() = {getattr(self, 'spin_slope_takeoff', None).text() if hasattr(self, 'spin_slope_takeoff') else 'N/A'}")  # noqa: E501
                 # IMC checkbox eliminado; no aplica log
 
                 code_value = self.get_code_value('spin_code_takeoff')
@@ -1855,13 +1855,13 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 else:
                     default_max_width = float(self.spin_maxWidthDep_takeoff.text() or "1800")
                 # Allow user override via spin_maxWidthDep_takeoff if provided
-                user_max_width_text = self.spin_maxWidthDep_takeoff.text() if hasattr(self, 'spin_maxWidthDep_takeoff') else ""
-                max_width_dep = float(user_max_width_text) if user_max_width_text not in ["", None] else default_max_width
+                user_max_width_text = self.spin_maxWidthDep_takeoff.text() if hasattr(self, 'spin_maxWidthDep_takeoff') else ""  # noqa: E501
+                max_width_dep = float(user_max_width_text) if user_max_width_text not in ["", None] else default_max_width  # noqa: E501
 
                 # Direction parameter like Approach
                 s_value = 0 if self.direction_start_to_end else -1
 
-                # For Take-Off: per Issue #64, DER Elevation (Z0) is the datum and should be used regardless of direction.
+                # For Take-Off: per Issue #64, DER Elevation (Z0) is the datum and should be used regardless of direction.  # noqa: E501
                 # We therefore set ZE equal to Z0 to avoid the previous hardcoded ZE and remove ambiguity.
                 specific_params = {
                     'code': code_value,  # QComboBox
@@ -1870,12 +1870,12 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     'maxWidthDep': max_width_dep,  # Default from code; user-editable
                     'CWYLength': float(self.spin_CWYLength_takeoff.text() or "0"),   # QLineEdit (clearway length)
                     'Z0': float(self.spin_Z0_takeoff.text() or "0"),                 # DER Elevation (m)
-                    'ZE': float(self.spin_Z0_takeoff.text() or "0"),                 # Use DER (Z0) as ZE datum per spec
+                    'ZE': float(self.spin_Z0_takeoff.text() or "0"),                 # Use DER (Z0) as ZE datum per spec  # noqa: E501
                     # Newly exposed parameters
-                    'divergencePct': float(self.spin_divergence_takeoff.text() or "12.5") if hasattr(self, 'spin_divergence_takeoff') else 12.5,
-                    'startDistance': float(self.spin_startDistance_takeoff.text() or "60") if hasattr(self, 'spin_startDistance_takeoff') else 60.0,
-                    'surfaceLength': float(self.spin_surfaceLength_takeoff.text() or "15000") if hasattr(self, 'spin_surfaceLength_takeoff') else 15000.0,
-                    'slopePct': float(self.spin_slope_takeoff.text() or "2.0") if hasattr(self, 'spin_slope_takeoff') else 2.0,
+                    'divergencePct': float(self.spin_divergence_takeoff.text() or "12.5") if hasattr(self, 'spin_divergence_takeoff') else 12.5,  # noqa: E501
+                    'startDistance': float(self.spin_startDistance_takeoff.text() or "60") if hasattr(self, 'spin_startDistance_takeoff') else 60.0,  # noqa: E501
+                    'surfaceLength': float(self.spin_surfaceLength_takeoff.text() or "15000") if hasattr(self, 'spin_surfaceLength_takeoff') else 15000.0,  # noqa: E501
+                    'slopePct': float(self.spin_slope_takeoff.text() or "2.0") if hasattr(self, 'spin_slope_takeoff') else 2.0,  # noqa: E501
                     'direction': s_value
                 }
                 print(f"QOLS DEBUG: Take-off Surface specific_params = {specific_params}")
@@ -1884,7 +1884,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 # IMPORTANT: For transitional, use the specific rotation button instead of general direction
                 s_value = 0 if self.transitional_direction_normal else -1  # s = 0 for normal, s = -1 for rotated
 
-                print(f"QOLS DEBUG: Transitional rotation button normal={self.transitional_direction_normal}, s={s_value}")
+                print(f"QOLS DEBUG: Transitional rotation button normal={self.transitional_direction_normal}, s={s_value}")  # noqa: E501
 
                 specific_params = {
                     'code': self.get_code_value('spin_code_transitional'),  # QComboBox
@@ -1893,7 +1893,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                     'Z0': float(self.spin_Z0_transitional.text() or "0"),              # QLineEdit
                     'ZE': float(self.spin_ZE_transitional.text() or "0"),              # QLineEdit
                     'ARPH': float(self.spin_ARPH_transitional.text() or "0"),          # QLineEdit
-                    'Tslope': float(self.spin_Tslope_transitional.text() or "0") / 100.0,   # QLineEdit, convert % to decimal
+                    'Tslope': float(self.spin_Tslope_transitional.text() or "0") / 100.0,   # QLineEdit, convert % to decimal  # noqa: E501
                     's': s_value  # Special parameter for transitional runway direction
                 }
                 print(f"QOLS DEBUG: Transitional Surface specific_params = {specific_params}")
