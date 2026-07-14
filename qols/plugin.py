@@ -231,6 +231,10 @@ class QOLS:
                 self.execute_takeoff_surface(params)
             elif st == SurfaceType.TRANSITIONAL:
                 self.execute_transitional_surface(params)
+            elif st == SurfaceType.NEW_OLS_OFS_APPROACH:
+                self.execute_new_ols_ofs_approach(params)
+            elif st == SurfaceType.NEW_OLS_OES_TRANSITIONAL:
+                self.execute_new_ols_oes_transitional(params)
             else:
                 raise ValueError(f"Unhandled surface type: {st!r}")
 
@@ -275,6 +279,14 @@ class QOLS:
 
     def execute_transitional_surface(self, params):
         script_path = os.path.join(self.plugin_dir, 'scripts', 'TransitionalSurface_UTM.py')
+        self.execute_script(script_path, params)
+
+    def execute_new_ols_ofs_approach(self, params):
+        script_path = os.path.join(self.plugin_dir, 'scripts', 'new-ols-ofs-approach-UTM.py')
+        self.execute_script(script_path, params)
+
+    def execute_new_ols_oes_transitional(self, params):
+        script_path = os.path.join(self.plugin_dir, 'scripts', 'new-ols-oes-transitional-UTM.py')
         self.execute_script(script_path, params)
 
     def execute_combined_inner_conical_surface(self, params):

@@ -30,6 +30,9 @@ class SurfaceType(str, Enum):
     OUTER_HORIZONTAL = "Outer Horizontal"
     TAKEOFF = "Take-Off Surface"
     TRANSITIONAL = "Transitional Surface"
+    # New OLS concept (ICAO approved) — dispatched by concept-tab index, not tab text
+    NEW_OLS_OFS_APPROACH = "New OLS - Approach"
+    NEW_OLS_OES_TRANSITIONAL = "New OLS - Transitional"
 
     @classmethod
     def from_tab_text(cls, text: str) -> "SurfaceType":
