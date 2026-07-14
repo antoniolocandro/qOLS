@@ -4,6 +4,7 @@ Based on original working script with UI parameter integration
 Considering 15° course changes in night IMC or VMC conditions
 Procedure to be used in Projected Coordinate System Only
 '''
+# flake8: noqa  # exec()-dispatched script; star imports intentional (see TD-03)
 myglobals = set(globals().keys())
 
 from qgis.core import *
