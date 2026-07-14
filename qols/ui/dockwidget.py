@@ -124,6 +124,9 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         # Track connected layers for selection signals (Issue #59)
         self.connected_runway_layer = None
         self.connected_threshold_layer = None
+        # Lambda slots stored for proper selectionChanged disconnection (Issue #105)
+        self._runway_selection_slot = None
+        self._threshold_selection_slot = None
         # State tracking for dropdown tooltip optimization (BUG-05)
         self._last_runway_count = 0
         self._last_threshold_count = 0
@@ -496,15 +499,23 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             runway_layer = self.runwayLayerCombo.currentLayer()
             threshold_layer = self.thresholdLayerCombo.currentLayer()
 
-            # Connect to Runway Layer Centerline selection changes
+            # Connect to Runway Layer Centerline selection changes.
+            # Lambda wrapper discards the 3 args emitted by selectionChanged so the
+            # 0-arg update_selection_info slot is called correctly in both Qt5 and Qt6.
             if runway_layer and isinstance(runway_layer, QgsVectorLayer):
-                runway_layer.selectionChanged.connect(self.update_selection_info)
+                self._runway_selection_slot = lambda *_: self.update_selection_info()
+                runway_layer.selectionChanged.connect(self._runway_selection_slot)
                 self.connected_runway_layer = runway_layer
+            else:
+                self._runway_selection_slot = None
 
             # Connect to threshold layer selection changes
             if threshold_layer and isinstance(threshold_layer, QgsVectorLayer):
-                threshold_layer.selectionChanged.connect(self.update_selection_info)
+                self._threshold_selection_slot = lambda *_: self.update_selection_info()
+                threshold_layer.selectionChanged.connect(self._threshold_selection_slot)
                 self.connected_threshold_layer = threshold_layer
+            else:
+                self._threshold_selection_slot = None
 
         except Exception as e:
             logger.warning(f"Unhandled error: {e}")
@@ -512,19 +523,25 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
     def disconnect_layer_selection_signals(self):
         """Disconnect from previously connected layer selection signals."""
         try:
-            if self.connected_runway_layer:
+            if self.connected_runway_layer and self._runway_selection_slot:
                 try:
-                    self.connected_runway_layer.selectionChanged.disconnect(self.update_selection_info)
+                    self.connected_runway_layer.selectionChanged.disconnect(
+                        self._runway_selection_slot
+                    )
                 except RuntimeError:
                     pass  # Signal might not be connected
                 self.connected_runway_layer = None
+                self._runway_selection_slot = None
 
-            if self.connected_threshold_layer:
+            if self.connected_threshold_layer and self._threshold_selection_slot:
                 try:
-                    self.connected_threshold_layer.selectionChanged.disconnect(self.update_selection_info)
+                    self.connected_threshold_layer.selectionChanged.disconnect(
+                        self._threshold_selection_slot
+                    )
                 except RuntimeError:
                     pass  # Signal might not be connected
                 self.connected_threshold_layer = None
+                self._threshold_selection_slot = None
 
         except Exception as e:
             logger.warning(f"Unhandled error: {e}")
@@ -943,7 +960,7 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         """Handle events for dropdown hover tooltips - Native QGIS styling only."""
         try:
             # Check if this is a mouse move event in one of our dropdown views
-            if event.type() == event.MouseMove:
+            if event.type() == EVENT_MOUSE_MOVE:
                 # Get the view that received the event
                 if obj == self.runwayLayerCombo.view() or obj == self.thresholdLayerCombo.view():
                     # Get the item under the mouse
@@ -962,7 +979,11 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                             obj.setToolTip(tooltip)
 
                             # Method 2: Force show tooltip at mouse position (native QGIS style)
-                            QToolTip.showText(event.globalPos(), tooltip, obj)
+                            try:
+                                _gpos = event.globalPosition().toPoint()  # Qt6
+                            except AttributeError:
+                                _gpos = event.globalPos()                 # Qt5
+                            QToolTip.showText(_gpos, tooltip, obj)
 
                         return False  # Let the event propagate normally
                     else:
