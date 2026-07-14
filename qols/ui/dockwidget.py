@@ -27,7 +27,10 @@ from .. import logger  # CR-01
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import pyqtSignal, pyqtSlot, QRegularExpression
 from qgis.PyQt.QtGui import QRegularExpressionValidator
-from qgis.PyQt.QtWidgets import QApplication, QCheckBox, QComboBox, QDockWidget, QLabel, QLineEdit, QToolTip
+from qgis.PyQt.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDockWidget,
+    QLabel, QLineEdit, QMessageBox, QToolTip,
+)
 from ..compat import TOOLTIP_ROLE, MSG_INFO, MSG_CRITICAL
 from qgis.core import QgsMapLayerProxyModel, QgsProject, QgsWkbTypes, QgsVectorLayer
 
@@ -1326,9 +1329,30 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
         except Exception as e:
             self.show_error_message(f"Error starting calculation: {str(e)}")
 
+    def _validate_project_crs(self) -> bool:
+        """Return True if project CRS is projected; show blocking dialog and return False if geographic."""
+        crs = QgsProject.instance().crs()
+        if crs.isGeographic():
+            QMessageBox.critical(
+                self,
+                "Projected Coordinate System Required",
+                f"The QGIS project is using a geographic (non-projected) coordinate system:\n\n"
+                f"  {crs.authid()} — {crs.description()}\n\n"
+                f"OLS calculations require a projected CRS that uses metres as units.\n\n"
+                f"To fix:\n"
+                f"  1. Go to Project → Properties → CRS\n"
+                f"  2. Select a projected CRS (e.g. a UTM zone for your area)\n"
+                f"  3. Re-run the calculation."
+            )
+            return False
+        return True
+
     def validate_layers(self):
         """Validate that required layers are selected with correct geometry types - ULTRA ROBUST VERSION."""
         try:
+            # CRITICAL CHECK 0: Project CRS must be projected (not geographic/lat-lon)
+            if not self._validate_project_crs():
+                return False
 
             runway_layer = self.runwayLayerCombo.currentLayer()
             threshold_layer = self.thresholdLayerCombo.currentLayer()
