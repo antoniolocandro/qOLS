@@ -4,6 +4,7 @@ Procedure to be used in Projected Coordinate System Only
 ENHANCED VERSION - Uses dynamic parameters from UI
 ROBUST VERSION - No fallbacks, explicit layer and feature selection required
 '''
+# flake8: noqa  # exec()-dispatched script; star imports intentional (see TD-03)
 myglobals = set(globals().keys())
 
 from qgis.core import *

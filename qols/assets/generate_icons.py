@@ -16,7 +16,7 @@ def create_runway_icon(size=16):
     runway_height = size // 3
     runway_y = (size - runway_height) // 2
     draw.rectangle([1, runway_y, size-1, runway_y + runway_height],
-                  fill=(74, 85, 104, 255), outline=(45, 55, 72, 255))
+                  fill=(74, 85, 104, 255), outline=(45, 55, 72, 255))  # noqa: E128
 
     # Centerline - white dashed
     center_y = size // 2
@@ -28,7 +28,7 @@ def create_runway_icon(size=16):
         x = 3 + i * (size // 4)
         if x < size - 2:
             draw.rectangle([x, runway_y + 1, x + 1, runway_y + runway_height - 1],
-                          fill=(255, 255, 255, 255))
+                          fill=(255, 255, 255, 255))  # noqa: E128
 
     return img
 
@@ -42,14 +42,14 @@ def create_threshold_icon(size=16):
     runway_height = size // 3
     runway_y = (size - runway_height) // 2
     draw.rectangle([1, runway_y, size-1, runway_y + runway_height],
-                  fill=(226, 232, 240, 255), outline=(74, 85, 104, 255))
+                  fill=(226, 232, 240, 255), outline=(74, 85, 104, 255))  # noqa: E128
 
     # Threshold area - red/white stripes
     threshold_width = size // 4
     for i in range(0, threshold_width, 2):
         color = (245, 101, 101, 255) if i % 4 == 0 else (255, 255, 255, 255)
         draw.rectangle([1 + i, runway_y, 1 + i + 1, runway_y + runway_height],
-                      fill=color)
+                      fill=color)  # noqa: E128
 
     # Direction arrow - red
     arrow_size = size // 4
@@ -69,7 +69,7 @@ def create_layer_icon(size=16):
 
     # Circle background
     draw.ellipse([1, 1, size-1, size-1],
-                fill=(189, 195, 199, 255), outline=(108, 117, 125, 255))
+                fill=(189, 195, 199, 255), outline=(108, 117, 125, 255))  # noqa: E128
 
     # Layer lines
     for i in range(3):
