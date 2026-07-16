@@ -30,10 +30,10 @@ from qgis.PyQt import uic
 from qgis.PyQt.QtCore import pyqtSignal, pyqtSlot, QRegularExpression
 from qgis.PyQt.QtGui import QRegularExpressionValidator
 from qgis.PyQt.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDockWidget,
-    QLabel, QLineEdit, QMessageBox, QToolTip,
+    QApplication, QCheckBox, QComboBox, QDialog, QDockWidget,
+    QLabel, QLineEdit, QMessageBox, QTextBrowser, QToolTip, QVBoxLayout,
 )
-from ..compat import TOOLTIP_ROLE, MSG_INFO, MSG_CRITICAL
+from ..compat import EVENT_MOUSE_MOVE, TOOLTIP_ROLE, MSG_INFO, MSG_CRITICAL
 from qgis.core import QgsMapLayerProxyModel, QgsProject, QgsWkbTypes, QgsVectorLayer
 
 # Load the UI file
@@ -756,9 +756,9 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
             layout = QVBoxLayout(dlg)
             layout.addWidget(browser)
             dlg.setLayout(layout)
-            dlg.exec_()
+            dlg.exec()  # exec() works in both PyQt5 and PyQt6
         except Exception as e:
-            logger.warning(f"Unhandled error: {e}")
+            logger.warning(f"Unhandled error in ADG help dialog: {e}")
 
     @pyqtSlot()
     def apply_ofz_defaults_from_selection(self):
@@ -1474,23 +1474,6 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
 
         except Exception as e:
             logger.warning(f"Unhandled error: {e}")
-
-    def _validate_project_crs(self) -> bool:
-        """Return True only when the project CRS is projected (not geographic).
-
-        Shows QMessageBox.critical and returns False when the CRS is geographic,
-        because all OLS geometry scripts require a projected (metric) CRS.
-        """
-        crs = QgsProject.instance().crs()
-        if crs.isGeographic():
-            QMessageBox.critical(
-                None,
-                "Projected CRS Required",
-                f"The project CRS ({crs.authid()} — {crs.description()}) is geographic. "
-                "All OLS calculations require a projected (metric) coordinate system.",
-            )
-            return False
-        return True
 
     @pyqtSlot()
     def on_calculate_clicked(self):
