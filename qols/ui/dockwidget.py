@@ -28,8 +28,8 @@ from qgis.PyQt import uic
 from qgis.PyQt.QtCore import pyqtSignal, pyqtSlot, QRegularExpression
 from qgis.PyQt.QtGui import QRegularExpressionValidator
 from qgis.PyQt.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDockWidget,
-    QLabel, QLineEdit, QMessageBox, QToolTip,
+    QApplication, QCheckBox, QComboBox, QDialog, QDockWidget,
+    QLabel, QLineEdit, QMessageBox, QTextBrowser, QToolTip, QVBoxLayout,
 )
 from ..compat import EVENT_MOUSE_MOVE, TOOLTIP_ROLE, MSG_INFO, MSG_CRITICAL
 from qgis.core import QgsMapLayerProxyModel, QgsProject, QgsWkbTypes, QgsVectorLayer
@@ -616,6 +616,93 @@ class QolsDockWidget(QDockWidget, FORM_CLASS):
                 self.set_numeric_value('spin_Tslope_transitional', rd['slope_pct'])
         except Exception as e:
             logger.warning(f"Unhandled error: {e}")
+
+    # ------------------------------------------------------------------
+    # New OLS concept defaults (#107-#109)
+    # ------------------------------------------------------------------
+
+    @pyqtSlot()
+    def apply_ofs_approach_defaults(self):
+        """Populate OFS Approach fields from ICAO Tables 4-1/4-2 (New OLS #108)."""
+        try:
+            rwy_type = self.combo_rwyType_ofs.currentText()
+            adg = self.combo_adg_ofs.currentText()
+            try:
+                rwy_width = float(self.spin_rwyWidth_ofs.text() or "45")
+            except ValueError:
+                rwy_width = 45.0
+            d = get_new_ols_approach_defaults(rwy_type, adg, rwy_width)
+            self.set_numeric_value('spin_distThr_ofs', d['distance_from_threshold_m'])
+            self.set_numeric_value('spin_innerEdge_ofs', d['inner_edge_m'])
+            self.set_numeric_value('spin_divergence_ofs', d['divergence_pct'])
+            self.set_numeric_value('spin_length_ofs', d['length_m'])
+            self.set_numeric_value('spin_slope_ofs', d['slope_pct'])
+            self.apply_oes_transitional_defaults()
+        except Exception as e:
+            logger.warning(f"Unhandled error: {e}")
+
+    @pyqtSlot()
+    def apply_oes_transitional_defaults(self):
+        """Populate OES Transitional fields (New OLS #109).
+
+        The OES width tracks the OFS Approach inner edge.
+        """
+        try:
+            d = get_new_ols_transitional_defaults()
+            self.set_numeric_value('spin_slope_oes', d['slope_pct'])
+            inner_edge_text = getattr(self, 'spin_innerEdge_ofs', None)
+            if inner_edge_text and hasattr(inner_edge_text, 'text'):
+                try:
+                    inner_val = float(inner_edge_text.text() or "155")
+                    self.set_numeric_value('spin_widthApp_oes', inner_val)
+                except ValueError:
+                    pass
+        except Exception as e:
+            logger.warning(f"Unhandled error: {e}")
+
+    @pyqtSlot()
+    def _show_adg_help_dialog(self):
+        """Show ADG reference table (ICAO Table 1-2) in an HTML dialog."""
+        try:
+            html = """
+<html><body>
+<h3 style="margin-bottom:8px">Table 1-2 — Aeroplane Design Group (ADG)</h3>
+<p style="font-size:11px">(see 1.8.2) &nbsp; Applicable as of 21 November 2030</p>
+<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:12px">
+ <tr style="background:#444;color:#fff">
+  <th>ADG</th>
+  <th>Indicated airspeed at threshold</th>
+  <th>and</th>
+  <th>Wingspan</th>
+ </tr>
+ <tr><td>I</td><td>Less than 169 km/h (91 kt)</td><td>and</td><td>Up to but not including 24 m</td></tr>
+ <tr><td>IIA</td><td>Less than 169 km/h (91 kt)</td><td>and</td><td>24 m up to but not including 36 m</td></tr>
+ <tr><td>IIB</td>
+ <td>169 km/h (91 kt) up to but not including 224 km/h (121 kt)</td>
+ <td>and</td><td>Up to but not including 36 m</td></tr>
+ <tr><td>IIC</td>
+ <td>224 km/h (121 kt) up to but not including 307 km/h (166 kt)</td>
+ <td>and</td><td>Up to but not including 36 m</td></tr>
+ <tr><td>III</td><td>Less than 307 km/h (166 kt)</td><td>and</td><td>36 m up to but not including 52 m</td></tr>
+ <tr><td>IV</td><td>Less than 307 km/h (166 kt)</td><td>and</td><td>52 m up to but not including 65 m</td></tr>
+ <tr><td>V</td><td>Less than 307 km/h (166 kt)</td><td>and</td><td>65 m up to but not including 80 m</td></tr>
+</table>
+<p style="font-size:11px;margin-top:8px">
+<b>Note 1.</b> Detailed specifications on ADG are given in the Airport Services Manual, Part 6.<br>
+<b>Note 2.</b> Examples: 161 km/h (87 kt) and wingspan 20 m → ADG I; 307 km/h (166 kt) and wingspan 72 m → ADG IV.
+</p>
+</body></html>"""
+            dlg = QDialog(self)
+            dlg.setWindowTitle("ADG Reference Table — ICAO Table 1-2")
+            dlg.resize(700, 320)
+            browser = QTextBrowser(dlg)
+            browser.setHtml(html)
+            layout = QVBoxLayout(dlg)
+            layout.addWidget(browser)
+            dlg.setLayout(layout)
+            dlg.exec()  # exec() works in both PyQt5 and PyQt6
+        except Exception as e:
+            logger.warning(f"Unhandled error in ADG help dialog: {e}")
 
     @pyqtSlot()
     def apply_ofz_defaults_from_selection(self):
